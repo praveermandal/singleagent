@@ -14,8 +14,8 @@ from selenium.webdriver.support import expected_conditions as EC
 
 # --- CONFIGURATION ---
 THREADS = 2           
-BURST_SIZE = 5        # Lower burst for stability
-BURST_DELAY = 0.5     # Wait for UI to update
+BURST_SIZE = 10       
+BURST_DELAY = 1.0     # Slower to ensure verification
 CYCLE_DELAY = 2.0     
 SESSION_DURATION = 1200 
 LOG_FILE = "message_log.txt"
@@ -61,7 +61,7 @@ def get_driver(agent_id):
     chrome_options.add_argument("--disable-blink-features=AutomationControlled")
     chrome_options.add_experimental_option("excludeSwitches", ["enable-automation"])
     
-    chrome_options.add_argument(f"--user-data-dir=/tmp/chrome_v45_{agent_id}_{random.randint(100,999)}")
+    chrome_options.add_argument(f"--user-data-dir=/tmp/chrome_v46_{agent_id}_{random.randint(100,999)}")
     return webdriver.Chrome(options=chrome_options)
 
 def clear_popups(driver):
@@ -69,52 +69,67 @@ def clear_popups(driver):
         "//button[text()='Not Now']",
         "//button[text()='Cancel']",
         "//div[text()='Not now']",
-        "//button[contains(text(), 'Use the App')]/following-sibling::button"
+        "//button[contains(text(), 'Use the App')]/following-sibling::button",
+        "//button[contains(@aria-label, 'Close')]"
     ]
     for xpath in popups:
         try:
             driver.find_element(By.XPATH, xpath).click()
-            time.sleep(0.3)
+            time.sleep(0.5)
         except: pass
 
 def find_mobile_box(driver):
-    selectors = [
-        "//textarea", 
-        "//div[@contenteditable='true']",
-        "//div[@role='textbox']"
-    ]
+    # STRICT selector: Only Textarea. Divs are unreliable on Mobile.
+    selectors = ["//textarea", "//form//textarea"]
     for xpath in selectors:
         try: return driver.find_element(By.XPATH, xpath)
         except: continue
     return None
 
-def physical_type_and_click(driver, element, text):
+def verify_and_send(driver, element, text):
     """
-    🔥 V45: HYBRID CLICKER
-    1. Click Box
-    2. Type Text
-    3. WAIT for 'Send' button to be clickable
-    4. Click 'Send'
+    🔥 V46: TEXT VERIFICATION PROTOCOL
+    1. Try to type.
+    2. Read value back.
+    3. If empty, try JS Inject.
+    4. Only click Send if value matches.
     """
+    
+    # METHOD A: Physical Type
     try:
-        # 1. Focus
         element.click()
-        
-        # 2. Type
+        element.clear()
         element.send_keys(text)
-        
-        # 3. Wait for Button Activation (Crucial for Phantom Fix)
-        # The button only appears/activates when text is valid
-        send_btn = WebDriverWait(driver, 2).until(
-            EC.element_to_be_clickable((By.XPATH, "//div[contains(text(), 'Send')] | //button[text()='Send']"))
-        )
-        
-        # 4. Click
-        send_btn.click()
-        return True
-    except:
-        # Fallback: If button doesn't appear, try Enter
-        element.send_keys(Keys.ENTER)
+    except: pass
+    
+    time.sleep(0.2)
+    
+    # VERIFICATION STEP
+    current_val = element.get_attribute("value")
+    
+    # If Method A failed (Box is empty), try Method B (JS Inject)
+    if not current_val or len(current_val) == 0:
+        driver.execute_script("""
+            var el = arguments[0];
+            el.value = arguments[1];
+            el.dispatchEvent(new Event('input', {bubbles: true}));
+            el.dispatchEvent(new Event('change', {bubbles: true}));
+        """, element, text)
+        time.sleep(0.2)
+        current_val = element.get_attribute("value")
+    
+    # FINAL CHECK: Did it work?
+    if current_val and len(current_val) > 0:
+        # Check for Blue Send Button
+        try:
+            btn = driver.find_element(By.XPATH, "//div[contains(text(), 'Send')] | //button[text()='Send']")
+            btn.click()
+            return True
+        except:
+            element.send_keys(Keys.ENTER)
+            return True
+    else:
+        # If we are here, the browser refused to accept text.
         return False
 
 def run_life_cycle(agent_id, cookie, target, messages):
@@ -123,7 +138,7 @@ def run_life_cycle(agent_id, cookie, target, messages):
     start_time = time.time()
     
     try:
-        log_status(agent_id, "🚀 Phoenix V45 (Hybrid Clicker)...")
+        log_status(agent_id, "🚀 Phoenix V46 (Verified Sender)...")
         driver = get_driver(agent_id)
         
         driver.get("https://www.instagram.com/")
@@ -131,44 +146,57 @@ def run_life_cycle(agent_id, cookie, target, messages):
         
         if cookie:
             try:
-                clean_session = cookie.split("sessionid=")[1].split(";")[0].strip() if "sessionid=" in cookie else cookie.strip()
+                if "sessionid=" in cookie:
+                    clean_session = cookie.split("sessionid=")[1].split(";")[0].strip()
+                else:
+                    clean_session = cookie.strip()
+                
                 driver.add_cookie({'name': 'sessionid', 'value': clean_session, 'path': '/', 'domain': '.instagram.com'})
             except: return
         
         driver.refresh()
         time.sleep(5)
         
+        if "login" in driver.current_url:
+            log_status(agent_id, "💀 Cookie Expired.")
+            return
+
         target_url = f"https://www.instagram.com/direct/t/{target}/"
+        log_status(agent_id, "🔍 Navigating...")
         driver.get(target_url)
-        time.sleep(6)
+        time.sleep(8)
         
         clear_popups(driver)
         msg_box = find_mobile_box(driver)
         
         if not msg_box:
             log_status(agent_id, "❌ Box not found.")
+            driver.save_screenshot(f"box_missing_{agent_id}.png")
             return
 
-        log_status(agent_id, "⚡ Hybrid Link Established.")
+        log_status(agent_id, "✅ Verified Link Established.")
 
         while (time.time() - start_time) < SESSION_DURATION:
             try:
                 for _ in range(BURST_SIZE):
                     msg = random.choice(messages)
                     
-                    # 🚨 V45: PHYSICAL SEND
-                    physical_type_and_click(driver, msg_box, f"{msg} ")
+                    # 🚨 V46: VERIFY
+                    success = verify_and_send(driver, msg_box, f"{msg} ")
                     
-                    sent_in_this_life += 1
-                    with COUNTER_LOCK:
-                        global GLOBAL_SENT
-                        GLOBAL_SENT += 1
+                    if success:
+                        sent_in_this_life += 1
+                        with COUNTER_LOCK:
+                            global GLOBAL_SENT
+                            GLOBAL_SENT += 1
+                    else:
+                        log_status(agent_id, "⚠️ Input Failed (Box Empty). Retrying...")
                     
                     time.sleep(BURST_DELAY)
                 
                 log_speed(agent_id, sent_in_this_life, start_time)
                 time.sleep(CYCLE_DELAY)
-            except:
+            except Exception:
                 break
 
     except Exception as e:
@@ -182,10 +210,16 @@ def agent_worker(agent_id, cookie, target, messages):
         time.sleep(5)
 
 def main():
-    print("🔥 V45 HYBRID CLICKER | PHANTOM FIX", flush=True)
+    with open(LOG_FILE, "w") as f: f.write("PHOENIX V46 START\n")
+    print("🔥 V46 VERIFIED SENDER | CHECKING INPUT", flush=True)
+    
     cookie = os.environ.get("INSTA_COOKIE", "").strip()
     target = os.environ.get("TARGET_THREAD_ID", "").strip()
     messages = os.environ.get("MESSAGES", "Hello").split("|")
+
+    if not cookie: 
+        print("❌ INSTA_COOKIE Missing!")
+        return
 
     with ThreadPoolExecutor(max_workers=THREADS) as executor:
         for i in range(THREADS):
