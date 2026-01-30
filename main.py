@@ -12,12 +12,12 @@ from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 
-# --- V50 CONFIGURATION ---
-THREADS = 2           # Number of concurrent agents
-BURST_SIZE = 4        # Messages sent per burst
-BURST_SPEED = 0.15    # Delay between messages in a burst (Fast)
-CYCLE_DELAY = 2.5     # Pause between bursts (Safety)
-SESSION_DURATION = 1200 # Max runtime in seconds
+# --- CONFIGURATION ---
+THREADS = 2           
+BURST_SIZE = 10       
+BURST_SPEED = 0.4     # Slightly slower to allow React sync
+CYCLE_DELAY = 2.0     
+SESSION_DURATION = 1200 
 LOG_FILE = "message_log.txt"
 
 GLOBAL_SENT = 0
@@ -45,18 +45,17 @@ def get_driver(agent_id):
     chrome_options.add_argument("--disable-dev-shm-usage")
     chrome_options.add_argument("--disable-gpu")
     
-    # 📉 V50 RESOURCE SAVER: BLOCK IMAGES & NOTIFICATIONS
+    # 📉 V52: LIGHTWEIGHT MODE (Block Images)
     prefs = {
-        "profile.managed_default_content_settings.images": 2, # 2 = Block images
+        "profile.managed_default_content_settings.images": 2, 
         "profile.default_content_setting_values.notifications": 2,
         "profile.default_content_setting_values.geolocation": 2
     }
     chrome_options.add_experimental_option("prefs", prefs)
     
-    # STEALTH: Hide Automation Flags
+    # STEALTH
     chrome_options.add_argument("--disable-blink-features=AutomationControlled")
     chrome_options.add_experimental_option("excludeSwitches", ["enable-automation"])
-    chrome_options.add_experimental_option('useAutomationExtension', False)
     
     # MOBILE EMULATION (Pixel 5)
     mobile_emulation = {
@@ -65,18 +64,13 @@ def get_driver(agent_id):
     }
     chrome_options.add_experimental_option("mobileEmulation", mobile_emulation)
     
-    # Unique user data dir for each thread
-    chrome_options.add_argument(f"--user-data-dir=/tmp/chrome_v50_{agent_id}_{random.randint(100,999)}")
+    chrome_options.add_argument(f"--user-data-dir=/tmp/chrome_v52_{agent_id}_{random.randint(100,999)}")
     
     driver = webdriver.Chrome(options=chrome_options)
     
-    # 👻 CDP PATCH: REMOVE WEBDRIVER FLAG (Anti-Detection)
+    # CDP PATCH
     driver.execute_cdp_cmd("Page.addScriptToEvaluateOnNewDocument", {
-        "source": """
-            Object.defineProperty(navigator, 'webdriver', {
-                get: () => undefined
-            });
-        """
+        "source": "Object.defineProperty(navigator, 'webdriver', {get: () => undefined})"
     })
     
     return driver
@@ -84,7 +78,7 @@ def get_driver(agent_id):
 def find_mobile_box(driver):
     selectors = [
         "//textarea", 
-        "//div[@role='textbox']",
+        "//div[@role='textbox']", 
         "//div[@contenteditable='true']"
     ]
     for xpath in selectors:
@@ -94,20 +88,41 @@ def find_mobile_box(driver):
         except: continue
     return None
 
-def ghost_type(driver, element, text):
+def automa_inject(driver, element, text):
     """
-    👻 GHOST TYPE: Physical typing + Immediate Send
+    🔥 V52: AUTOMA REFINED
+    Uses 'execCommand' + Explicit Event Triggering.
+    This fixes the 'Unavailable Message' bug.
     """
     try:
+        # 1. Click to Focus (Crucial for execCommand)
         element.click()
-        element.send_keys(text)
+        
+        # 2. The Automa Injection (JS)
+        driver.execute_script("""
+            var el = arguments[0];
+            var txt = arguments[1];
+            
+            el.focus();
+            
+            // The Automa Command (Simulates Paste)
+            document.execCommand('insertText', false, txt);
+            
+            // 🚨 FORCE REACT SYNC (Fixes 'Unavailable')
+            el.dispatchEvent(new Event('input', { bubbles: true }));
+            el.dispatchEvent(new Event('change', { bubbles: true }));
+        """, element, text)
+        
+        # 3. Short Sleep to let UI update
+        time.sleep(0.15)
+        
+        # 4. Click Send
         try:
-            # Try clicking the Send button
             btn = driver.find_element(By.XPATH, "//div[contains(text(), 'Send')] | //button[text()='Send']")
             btn.click()
         except:
-            # Fallback to Enter
             element.send_keys(Keys.ENTER)
+            
         return True
     except:
         return False
@@ -118,17 +133,14 @@ def run_life_cycle(agent_id, cookie, target, messages):
     start_time = time.time()
     
     try:
-        log_status(agent_id, "🚀 Phoenix V50 (Lightweight Ghost)...")
+        log_status(agent_id, "🚀 Phoenix V52 (Automa Refined)...")
         driver = get_driver(agent_id)
         
-        # 1. Load Homepage (Fast because no images)
         driver.get("https://www.instagram.com/")
         time.sleep(2)
         
-        # 2. Inject Cookie
         if cookie:
             try:
-                # Robust parsing
                 clean = cookie.strip()
                 if "sessionid=" in clean:
                     clean = clean.split("sessionid=")[1].split(";")[0].strip()
@@ -140,23 +152,18 @@ def run_life_cycle(agent_id, cookie, target, messages):
                     'domain': '.instagram.com'
                 })
             except: 
-                log_status(agent_id, "❌ Cookie Invalid/Parse Error")
+                log_status(agent_id, "❌ Cookie Invalid")
                 return
         
         driver.refresh()
-        time.sleep(3) # Short wait (Lightweight)
+        time.sleep(3) 
         
-        if "login" in driver.current_url:
-            log_status(agent_id, "💀 Cookie Expired (Redirected to Login).")
-            return
-
-        # 3. Go to Target
         target_url = f"https://www.instagram.com/direct/t/{target}/"
         log_status(agent_id, "🔍 Navigating...")
         driver.get(target_url)
         time.sleep(5)
         
-        # 4. Clear Popups (Blindly)
+        # Blind Popup Clear
         try:
             driver.execute_script("document.querySelectorAll('div[role=dialog]').forEach(e => e.remove());")
             driver.find_element(By.XPATH, "//button[text()='Not Now']").click()
@@ -165,17 +172,19 @@ def run_life_cycle(agent_id, cookie, target, messages):
         msg_box = find_mobile_box(driver)
         
         if not msg_box:
-            log_status(agent_id, f"❌ Box not found. URL: {driver.current_url}")
+            log_status(agent_id, "❌ Box not found.")
+            driver.save_screenshot(f"box_missing_{agent_id}.png")
             return
 
-        log_status(agent_id, "👻 Ghost Active. Sending...")
+        log_status(agent_id, "✅ Automa Active. Sending...")
 
         while (time.time() - start_time) < SESSION_DURATION:
             try:
-                # BURST LOOP
                 for _ in range(BURST_SIZE):
                     msg = random.choice(messages)
-                    ghost_type(driver, msg_box, f"{msg} ")
+                    
+                    # 🚨 V52 EXECUTION
+                    automa_inject(driver, msg_box, f"{msg} ")
                     
                     sent_in_this_life += 1
                     with COUNTER_LOCK:
@@ -200,16 +209,11 @@ def agent_worker(agent_id, cookie, target, messages):
         time.sleep(5)
 
 def main():
-    print("🔥 V50 LIGHTWEIGHT GHOST | NO IMAGES | STEALTH", flush=True)
+    print("🔥 V52 AUTOMA REFINED | UNAVAILABLE FIX", flush=True)
     
-    # Load Secrets
     cookie = os.environ.get("INSTA_COOKIE", "").strip()
     target = os.environ.get("TARGET_THREAD_ID", "").strip()
     messages = os.environ.get("MESSAGES", "Hello").split("|")
-
-    if not cookie:
-        print("❌ CRITICAL: INSTA_COOKIE is missing.")
-        return
 
     with ThreadPoolExecutor(max_workers=THREADS) as executor:
         for i in range(THREADS):
