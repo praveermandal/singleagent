@@ -14,8 +14,8 @@ from selenium.webdriver.support import expected_conditions as EC
 
 # --- CONFIGURATION ---
 THREADS = 2           
-BURST_SIZE = 15       # High burst for speed
-BURST_DELAY = 0.3     # Fast but safe
+BURST_SIZE = 15       
+BURST_DELAY = 0.3     
 CYCLE_DELAY = 1.0     
 SESSION_DURATION = 1200 
 LOG_FILE = "message_log.txt"
@@ -52,7 +52,6 @@ def get_driver(agent_id):
     chrome_options.add_argument("--disable-dev-shm-usage")
     chrome_options.add_argument("--disable-gpu")
     
-    # MOBILE EMULATION (Pixel 5)
     mobile_emulation = {
         "deviceMetrics": { "width": 393, "height": 851, "pixelRatio": 3.0 },
         "userAgent": "Mozilla/5.0 (Linux; Android 12; Pixel 5) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/103.0.0.0 Mobile Safari/537.36"
@@ -61,7 +60,7 @@ def get_driver(agent_id):
     chrome_options.add_argument("--disable-blink-features=AutomationControlled")
     chrome_options.add_experimental_option("excludeSwitches", ["enable-automation"])
     
-    chrome_options.add_argument(f"--user-data-dir=/tmp/chrome_v43_{agent_id}_{random.randint(100,999)}")
+    chrome_options.add_argument(f"--user-data-dir=/tmp/chrome_v44_{agent_id}_{random.randint(100,999)}")
     return webdriver.Chrome(options=chrome_options)
 
 def clear_popups(driver):
@@ -78,44 +77,51 @@ def clear_popups(driver):
         except: pass
 
 def find_mobile_box(driver):
-    selectors = ["//textarea", "//div[@role='textbox']", "//div[contains(@aria-label, 'Message')]"]
+    # Expanded list to catch DIVs too
+    selectors = [
+        "//textarea", 
+        "//div[@contenteditable='true']",
+        "//div[@role='textbox']",
+        "//div[contains(@aria-label, 'Message')]"
+    ]
     for xpath in selectors:
         try: return driver.find_element(By.XPATH, xpath)
         except: continue
     return None
 
-def react_native_inject(driver, element, text):
+def universal_inject(driver, element, text):
     """
-    🔥 V43: REACT PROTOTYPE SETTER
-    This bypasses the React state-lock that causes 'Unavailable' messages.
-    It calls the native HTML value setter directly.
+    🔥 V44: UNIVERSAL POLYMER INJECTOR
+    Safely handles both TEXTAREA and DIV inputs to prevent crashes.
     """
     driver.execute_script("""
         var element = arguments[0];
         var text = arguments[1];
         
-        // 1. Get the Native Setter from the HTML Prototype
-        var nativeInputValueSetter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, "value").set;
-        
-        // 2. Call it directly on the element (Bypasses React's shadow blocker)
-        nativeInputValueSetter.call(element, text);
-        
-        // 3. Dispatch the input event so Instagram 'sees' the change
-        var ev2 = new Event('input', { bubbles: true});
-        element.dispatchEvent(ev2);
-        
-        var ev3 = new Event('change', { bubbles: true});
-        element.dispatchEvent(ev3);
+        function triggerEvents(el) {
+            el.dispatchEvent(new Event('input', { bubbles: true }));
+            el.dispatchEvent(new Event('change', { bubbles: true }));
+            el.dispatchEvent(new Event('focus', { bubbles: true }));
+        }
+
+        // CHECK 1: Is it a Text Area?
+        if (element.tagName === 'TEXTAREA' || element.tagName === 'INPUT') {
+            var nativeSetter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, "value").set;
+            nativeSetter.call(element, text);
+            triggerEvents(element);
+        } 
+        // CHECK 2: Is it a Content-Editable Div?
+        else {
+            element.innerText = text; // Direct text set for DIVs
+            triggerEvents(element);
+        }
     """, element, text)
     
-    # Tiny pause for the 'Send' button to activate
     time.sleep(0.05) 
     
     try:
-        # Click the Send button
         driver.find_element(By.XPATH, "//div[contains(text(), 'Send')] | //button[text()='Send']").click()
     except:
-        # Fallback to Enter
         element.send_keys(Keys.ENTER)
 
 def run_life_cycle(agent_id, cookie, target, messages):
@@ -124,7 +130,7 @@ def run_life_cycle(agent_id, cookie, target, messages):
     start_time = time.time()
     
     try:
-        log_status(agent_id, "🚀 Phoenix V43 (React-Native Injector)...")
+        log_status(agent_id, "🚀 Phoenix V44 (Universal Injector)...")
         driver = get_driver(agent_id)
         
         driver.get("https://www.instagram.com/")
@@ -150,15 +156,15 @@ def run_life_cycle(agent_id, cookie, target, messages):
             log_status(agent_id, "❌ Box not found.")
             return
 
-        log_status(agent_id, "⚡ React-Link Established.")
+        log_status(agent_id, "⚡ Universal Link Established.")
 
         while (time.time() - start_time) < SESSION_DURATION:
             try:
                 for _ in range(BURST_SIZE):
                     msg = random.choice(messages)
                     
-                    # 🚨 V43: PROTOTYPE INJECT (No Jitter)
-                    react_native_inject(driver, msg_box, f"{msg} ")
+                    # 🚨 V44: SAFE INJECTION
+                    universal_inject(driver, msg_box, f"{msg} ")
                     
                     sent_in_this_life += 1
                     with COUNTER_LOCK:
@@ -183,7 +189,7 @@ def agent_worker(agent_id, cookie, target, messages):
         time.sleep(5)
 
 def main():
-    print("🔥 V43 REACT-NATIVE | FIXED UNAVAILABLE MSG", flush=True)
+    print("🔥 V44 UNIVERSAL INJECTOR | CRASH FIX", flush=True)
     cookie = os.environ.get("INSTA_COOKIE", "").strip()
     target = os.environ.get("TARGET_THREAD_ID", "").strip()
     messages = os.environ.get("MESSAGES", "Hello").split("|")
