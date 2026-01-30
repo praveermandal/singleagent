@@ -12,11 +12,11 @@ from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 
-# --- CONFIGURATION ---
+# --- VELOCITY CONFIGURATION ---
 THREADS = 2           
-BURST_SIZE = 10       
-BURST_DELAY = 0.5     
-CYCLE_DELAY = 2.0     
+BURST_SIZE = 15       # ⬆️ Increased for continuous fire
+BURST_DELAY = 0.2     # ⬇️ Reduced pause between messages
+CYCLE_DELAY = 1.0     # ⬇️ Shortened breather between bursts
 SESSION_DURATION = 1200 
 LOG_FILE = "message_log.txt"
 
@@ -41,7 +41,7 @@ def log_speed(agent_id, current_sent, start_time):
     timestamp = datetime.datetime.now().strftime("%H:%M:%S")
     with COUNTER_LOCK:
         total = GLOBAL_SENT
-    entry = f"[{timestamp}] ⚡ Agent {agent_id} | Session Total: {total} | Speed: {speed:.1f} msg/s"
+    entry = f"[{timestamp}] ⚡ Agent {agent_id} | Total: {total} | Speed: {speed:.1f} msg/s"
     print(entry, flush=True)
     write_log(entry)
 
@@ -60,7 +60,7 @@ def get_driver(agent_id):
     chrome_options.add_argument("--disable-blink-features=AutomationControlled")
     chrome_options.add_experimental_option("excludeSwitches", ["enable-automation"])
     
-    chrome_options.add_argument(f"--user-data-dir=/tmp/chrome_v41_{agent_id}_{random.randint(100,999)}")
+    chrome_options.add_argument(f"--user-data-dir=/tmp/chrome_v42_1_{agent_id}_{random.randint(100,999)}")
     return webdriver.Chrome(options=chrome_options)
 
 def clear_popups(driver):
@@ -68,67 +68,39 @@ def clear_popups(driver):
         "//button[text()='Not Now']",
         "//button[text()='Cancel']",
         "//div[text()='Not now']",
-        "//button[contains(text(), 'Use the App')]/following-sibling::button",
-        "//button[contains(@aria-label, 'Close')]"
+        "//button[contains(text(), 'Use the App')]/following-sibling::button"
     ]
     for xpath in popups:
         try:
             driver.find_element(By.XPATH, xpath).click()
-            time.sleep(0.5)
+            time.sleep(0.3)
         except: pass
 
 def find_mobile_box(driver):
-    selectors = [
-        "//textarea", 
-        "//div[@role='textbox']",
-        "//div[contains(@aria-label, 'Message')]"
-    ]
+    selectors = ["//textarea", "//div[@role='textbox']", "//div[contains(@aria-label, 'Message')]"]
     for xpath in selectors:
         try: return driver.find_element(By.XPATH, xpath)
         except: continue
     return None
 
-def clipboard_paste_event(driver, element, text):
+def velocity_type(driver, element, text):
     """
-    🔥 V41: CLIPBOARD PASTE EVENT
-    This bypasses the 'Unavailable Message' error by simulating
-    a real data paste event, forcing React to accept the text string.
+    ⚡ HIGH-VELOCITY PHYSICAL TYPING
     """
-    driver.execute_script("""
-        var element = arguments[0];
-        var text = arguments[1];
-        
-        element.focus();
-        
-        // Create a fake paste event
-        var dataTransfer = new DataTransfer();
-        dataTransfer.items.add(text, 'text/plain');
-        
-        var pasteEvent = new ClipboardEvent('paste', {
-            clipboardData: dataTransfer,
-            bubbles: true,
-            cancelable: true
-        });
-        
-        element.dispatchEvent(pasteEvent);
-        
-        // Backup: Standard insert if paste is blocked
-        if (!element.value || element.value === "") {
-            document.execCommand('insertText', false, text);
-        }
-        
-        element.dispatchEvent(new Event('input', {bubbles: true}));
-        element.dispatchEvent(new Event('change', {bubbles: true}));
-    """, element, text)
-    
-    time.sleep(0.1) 
-    
     try:
-        # Try finding the Send button
-        btn = driver.find_element(By.XPATH, "//div[contains(text(), 'Send')] | //button[text()='Send']")
-        btn.click()
+        # Standard typing (Faster than JS injection for React recognition)
+        element.send_keys(text)
+        
+        # Immediate attempt to find and click Send
+        try:
+            # We look for the blue 'Send' text button
+            send_btn = driver.find_element(By.XPATH, "//div[contains(text(), 'Send')] | //button[text()='Send']")
+            send_btn.click()
+        except:
+            # Rapid fallback to Enter key
+            element.send_keys(Keys.ENTER)
     except:
-        element.send_keys(Keys.ENTER)
+        pass
 
 def run_life_cycle(agent_id, cookie, target, messages):
     driver = None
@@ -136,76 +108,52 @@ def run_life_cycle(agent_id, cookie, target, messages):
     start_time = time.time()
     
     try:
-        log_status(agent_id, "🚀 Phoenix V41 (Clipboard Protocol)...")
+        log_status(agent_id, "🚀 Phoenix V42.1 (Velocity Mode)...")
         driver = get_driver(agent_id)
-        
-        # 1. Load Domain
         driver.get("https://www.instagram.com/")
-        time.sleep(3)
+        time.sleep(2)
         
-        # 2. Inject Cookie
         if cookie:
             try:
-                if "sessionid=" in cookie:
-                    clean_session = cookie.split("sessionid=")[1].split(";")[0].strip()
-                else:
-                    clean_session = cookie.strip()
-                
-                if not clean_session or len(clean_session) < 5:
-                    raise ValueError(f"Cookie ID invalid")
-
-                driver.add_cookie({
-                    'name': 'sessionid', 
-                    'value': clean_session, 
-                    'path': '/', 
-                    'domain': '.instagram.com'
-                })
-                log_status(agent_id, "🍪 Cookie Injected.")
-            except Exception as e:
-                log_status(agent_id, f"❌ Cookie Error: {e}")
-                return
+                clean_session = cookie.split("sessionid=")[1].split(";")[0].strip() if "sessionid=" in cookie else cookie.strip()
+                driver.add_cookie({'name': 'sessionid', 'value': clean_session, 'path': '/', 'domain': '.instagram.com'})
+            except: return
         
         driver.refresh()
-        time.sleep(5)
+        time.sleep(4)
         
-        if "login" in driver.current_url:
-            log_status(agent_id, "💀 Cookie Expired (Redirected to Login).")
-            return
-
-        # 3. Target
         target_url = f"https://www.instagram.com/direct/t/{target}/"
-        log_status(agent_id, "🔍 Navigating...")
         driver.get(target_url)
-        time.sleep(7) 
+        time.sleep(6)
         
         clear_popups(driver)
-        
         msg_box = find_mobile_box(driver)
+        
         if not msg_box:
             log_status(agent_id, "❌ Box not found.")
-            driver.save_screenshot(f"box_missing_{agent_id}.png")
             return
 
-        log_status(agent_id, "✅ Clipboard Ready. Sending...")
+        log_status(agent_id, "⚡ Velocity Engaged.")
 
         while (time.time() - start_time) < SESSION_DURATION:
             try:
                 for _ in range(BURST_SIZE):
                     msg = random.choice(messages)
                     
-                    # 🚨 NO JITTER (Fixes 'Unavailable' bug)
-                    clipboard_paste_event(driver, msg_box, msg)
+                    # ⚡ PHYSICAL SEND
+                    velocity_type(driver, msg_box, f"{msg} ")
                     
                     sent_in_this_life += 1
                     with COUNTER_LOCK:
                         global GLOBAL_SENT
                         GLOBAL_SENT += 1
                     
-                    time.sleep(random.uniform(0.3, 0.6))
+                    # ⚡ Minimal gap between messages
+                    time.sleep(BURST_DELAY)
                 
                 log_speed(agent_id, sent_in_this_life, start_time)
                 time.sleep(CYCLE_DELAY)
-            except Exception:
+            except:
                 break
 
     except Exception as e:
@@ -216,19 +164,13 @@ def run_life_cycle(agent_id, cookie, target, messages):
 def agent_worker(agent_id, cookie, target, messages):
     while True:
         run_life_cycle(agent_id, cookie, target, messages)
-        time.sleep(5)
+        time.sleep(2)
 
 def main():
-    with open(LOG_FILE, "w") as f: f.write("PHOENIX V41 START\n")
-    print("🔥 V41 CLIPBOARD PROTOCOL | JITTER REMOVED", flush=True)
-    
+    print("🔥 V42.1 VELOCITY TYPIST | NO JITTER", flush=True)
     cookie = os.environ.get("INSTA_COOKIE", "").strip()
     target = os.environ.get("TARGET_THREAD_ID", "").strip()
     messages = os.environ.get("MESSAGES", "Hello").split("|")
-
-    if not cookie: 
-        print("❌ INSTA_COOKIE Missing!")
-        return
 
     with ThreadPoolExecutor(max_workers=THREADS) as executor:
         for i in range(THREADS):
