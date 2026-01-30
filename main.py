@@ -10,8 +10,10 @@ from selenium import webdriver
 from selenium.webdriver.common.by import By
 from selenium.webdriver.common.keys import Keys
 from selenium.webdriver.chrome.options import Options
+from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support import expected_conditions as EC
 
-# --- V58 CONFIGURATION ---
+# --- V59 CONFIGURATION ---
 THREADS = 2           
 BASE_BURST = 20       
 BASE_SPEED = 0.2      
@@ -22,34 +24,26 @@ REFRESH_INTERVAL = 600
 GLOBAL_SENT = 0
 COUNTER_LOCK = threading.Lock()
 
-# --- GITHUB ACTIONS LOGGING HELPERS ---
+# --- GITHUB LOGGING ---
 def gh_notice(msg):
-    """Sends a visible notice to the GitHub Actions Summary page."""
     print(f"::notice::{msg}", flush=True)
 
 def gh_group(title):
-    """Starts a collapsible log group."""
     print(f"::group::{title}", flush=True)
 
 def gh_end_group():
-    """Ends a collapsible log group."""
     print("::endgroup::", flush=True)
 
 def log_status(agent_id, msg):
     timestamp = datetime.datetime.now().strftime("%H:%M:%S")
-    # Standard log for the console
     print(f"[{timestamp}] 🤖 Agent {agent_id}: {msg}", flush=True)
 
 def log_speed(agent_id, current_sent, start_time, mode="Normal"):
     elapsed = time.time() - start_time
     if elapsed == 0: elapsed = 1
     speed = current_sent / elapsed
-    
     with COUNTER_LOCK:
         total = GLOBAL_SENT
-    
-    # Update the GitHub Notice with the latest stats
-    gh_notice(f"🔥 Speed: {speed:.1f} msg/s | Total Sent: {total} | Mode: {mode}")
     print(f"⚡ Agent {agent_id} | {mode} | Total: {total} | Speed: {speed:.1f} msg/s", flush=True)
 
 def get_driver(agent_id):
@@ -69,7 +63,7 @@ def get_driver(agent_id):
         "userAgent": "Mozilla/5.0 (Linux; Android 12; Pixel 5) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/103.0.0.0 Mobile Safari/537.36"
     }
     chrome_options.add_experimental_option("mobileEmulation", mobile_emulation)
-    chrome_options.add_argument(f"--user-data-dir=/tmp/chrome_v58_{agent_id}_{random.randint(100,999)}")
+    chrome_options.add_argument(f"--user-data-dir=/tmp/chrome_v59_{agent_id}_{random.randint(100,999)}")
     
     driver = webdriver.Chrome(options=chrome_options)
     driver.execute_cdp_cmd("Page.addScriptToEvaluateOnNewDocument", {
@@ -97,7 +91,6 @@ def adaptive_inject(driver, element, text):
             el.dispatchEvent(new Event('change', { bubbles: true }));
         """, element, text)
         time.sleep(0.1)
-        
         btn = driver.find_element(By.XPATH, "//div[contains(text(), 'Send')] | //button[text()='Send']")
         btn.click()
         return True
@@ -121,16 +114,47 @@ def run_life_cycle(agent_id, cookie, target, messages):
     
     try:
         gh_group(f"🚀 Agent {agent_id} Initialization")
-        log_status(agent_id, "Booting V58 GitHub Integrator...")
+        log_status(agent_id, "Booting V59 Robust Connector...")
         driver = get_driver(agent_id)
-        driver.get("https://www.instagram.com/")
-        time.sleep(2)
         
+        # 🛡️ V59 FIX: ROBUST CONNECTION HANDSHAKE
+        # Attempt to connect to Instagram 3 times before giving up
+        connected = False
+        for attempt in range(3):
+            try:
+                log_status(agent_id, f"Connection Attempt {attempt+1}...")
+                driver.get("https://www.instagram.com/")
+                
+                # WAIT until domain is actually instagram.com
+                WebDriverWait(driver, 10).until(
+                    lambda d: "instagram.com" in d.current_url
+                )
+                connected = True
+                break
+            except Exception as e:
+                log_status(agent_id, f"⚠️ Connection failed ({e}). Retrying...")
+                time.sleep(2)
+        
+        if not connected:
+            raise Exception("Failed to load Instagram.com after 3 attempts.")
+
+        # Inject Cookie
         clean_session = extract_session_id(cookie)
-        driver.add_cookie({'name': 'sessionid', 'value': clean_session, 'path': '/', 'domain': '.instagram.com'})
+        try:
+            driver.add_cookie({
+                'name': 'sessionid', 
+                'value': clean_session, 
+                'path': '/', 
+                'domain': '.instagram.com'
+            })
+        except Exception as e:
+            # Debugging info if it fails again
+            current_domain = driver.execute_script("return document.domain;")
+            raise Exception(f"Cookie Injection Failed. Browser is on: {current_domain}. Error: {e}")
+            
         driver.refresh()
         time.sleep(4) 
-        gh_end_group() # Close the init logs
+        gh_end_group()
 
         driver.get(f"https://www.instagram.com/direct/t/{target}/")
         time.sleep(6)
@@ -177,8 +201,6 @@ def run_life_cycle(agent_id, cookie, target, messages):
                     gh_notice(f"⚠️ Agent {agent_id} Rate Limited! Entering Stealth Mode.")
                 recovery_mode = True
             else:
-                if recovery_mode:
-                    gh_notice(f"✅ Agent {agent_id} Recovered! Resuming High Speed.")
                 recovery_mode = False
 
             log_speed(agent_id, sent_in_this_life, start_time, "Recovery" if recovery_mode else "High-Speed")
@@ -187,6 +209,9 @@ def run_life_cycle(agent_id, cookie, target, messages):
     except Exception as e:
         gh_notice(f"❌ Agent {agent_id} Crashed: {e}")
         log_status(agent_id, f"Detailed Error: {e}")
+        # Take screenshot on crash
+        try: driver.save_screenshot(f"crash_agent_{agent_id}.png")
+        except: pass
     finally:
         if driver: driver.quit()
 
@@ -199,7 +224,7 @@ def main():
         gh_notice("❌ Error: INSTA_COOKIE Secret is Missing!")
         sys.exit(1)
 
-    gh_notice("🔥 Phoenix V58 Started | 2 Threads | High Velocity")
+    gh_notice("🔥 Phoenix V59 Started | 2 Threads | Robust Connection")
 
     with ThreadPoolExecutor(max_workers=THREADS) as executor:
         for i in range(THREADS):
