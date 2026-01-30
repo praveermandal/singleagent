@@ -15,7 +15,7 @@ from selenium.webdriver.support import expected_conditions as EC
 # --- CONFIGURATION ---
 THREADS = 2           
 BURST_SIZE = 5        
-BURST_DELAY = 0.2     
+BURST_DELAY = 0.3     # Slightly slower to allow "Send" button to activate
 CYCLE_DELAY = 2.0     
 SESSION_DURATION = 1200 
 REFRESH_INTERVAL = 300 
@@ -90,13 +90,24 @@ def perform_login(driver, agent_id, username, password):
         log_status(agent_id, f"❌ Login Error: {e}")
         return False
 
-def instant_inject(driver, element, text):
+def real_type_inject(driver, element, text):
+    """
+    V24 FIX: Hybird Injection
+    1. Injects the main text via JS (Fast)
+    2. Types a 'Space' via Selenium (Wakes up the Send Button)
+    """
+    # 1. Fast Inject
     driver.execute_script("""
         var elm = arguments[0], txt = arguments[1];
         elm.focus();
         document.execCommand('insertText', false, txt);
-        elm.dispatchEvent(new Event('input', {bubbles: true}));
     """, element, text)
+    
+    # 2. Wake Up Event (The "Ghost Buster" Logic)
+    # We send a physical space key, then a backspace.
+    # This forces Instagram to acknowledge "User is typing"
+    element.send_keys(" ")
+    element.send_keys(Keys.BACK_SPACE)
 
 def run_life_cycle(agent_id, user, pw, cookie, target, messages):
     driver = None
@@ -108,26 +119,19 @@ def run_life_cycle(agent_id, user, pw, cookie, target, messages):
         log_status(agent_id, "🚀 Phoenix Rising...")
         driver = get_driver(agent_id)
         
-        # --- 🚨 COOKIE FIX START ---
-        # 1. Force Browser to Instagram Domain
+        # Cookie Logic
         driver.get("https://www.instagram.com/")
         time.sleep(3)
-        
-        # 2. Verify we are actually on Instagram (Fixes 'Invalid Domain' Error)
         if "instagram.com" not in driver.current_url:
-            log_status(agent_id, "⚠️ Network Error: Could not reach Instagram. Retrying...")
             driver.get("https://www.instagram.com/")
             time.sleep(5)
 
-        # 3. Safe Cookie Injection (No 'domain' param needed)
         if cookie:
             clean_session = cookie.split("sessionid=")[1].split(";")[0] if "sessionid=" in cookie else cookie
-            # We ONLY send name, value, and path. We let Chrome decide the domain.
             driver.add_cookie({'name': 'sessionid', 'value': clean_session, 'path': '/'})
             
         driver.refresh()
         time.sleep(5)
-        # --- 🚨 COOKIE FIX END ---
 
         log_status(agent_id, "🔍 Navigating to Target...")
         driver.get(f"https://www.instagram.com/direct/t/{target}/")
@@ -143,10 +147,8 @@ def run_life_cycle(agent_id, user, pw, cookie, target, messages):
         try:
             msg_box = WebDriverWait(driver, 20).until(EC.presence_of_element_located((By.XPATH, box_xpath)))
         except:
-            log_status(agent_id, "❌ ERROR: Chat box not found! Taking Screenshot...")
+            log_status(agent_id, "❌ ERROR: Chat box not found!")
             driver.save_screenshot(f"debug_agent_{agent_id}_error.png")
-            with open(f"debug_agent_{agent_id}_source.html", "w") as f:
-                f.write(driver.page_source)
             return
 
         log_status(agent_id, "✅ Target Locked. Sending...")
@@ -163,13 +165,25 @@ def run_life_cycle(agent_id, user, pw, cookie, target, messages):
                 for _ in range(BURST_SIZE):
                     msg = random.choice(messages)
                     jitter = "⠀" * random.randint(0, 1)
-                    instant_inject(driver, msg_box, f"{msg}{jitter}")
+                    
+                    # 🚨 V24 CHANGE: USE HYBRID TYPING
+                    real_type_inject(driver, msg_box, f"{msg}{jitter}")
+                    
+                    # Try ENTER first
                     msg_box.send_keys(Keys.ENTER)
+                    
+                    # 🚨 FALLBACK: Look for the 'Send' button explicitly if Enter failed
+                    # This is heavy, so we rely on Enter mostly, but this ensures delivery
+                    # try:
+                    #     send_btn = driver.find_element(By.XPATH, "//div[text()='Send']")
+                    #     send_btn.click()
+                    # except: pass
+
                     sent_in_this_life += 1
                     with COUNTER_LOCK:
                         global GLOBAL_SENT
                         GLOBAL_SENT += 1
-                    time.sleep(random.uniform(0.12, 0.20))
+                    time.sleep(random.uniform(0.15, 0.25))
                 
                 log_speed(agent_id, sent_in_this_life, session_start_time)
                 time.sleep(CYCLE_DELAY)
@@ -197,7 +211,7 @@ def main():
     with open(LOG_FILE, "w") as f:
         f.write(f"--- SESSION START: {datetime.datetime.now()} ---\n")
     
-    print(f"🔥 V23.1 COOKIE FIX | {THREADS} THREADS", flush=True)
+    print(f"🔥 V24 GHOST BUSTER | {THREADS} THREADS", flush=True)
     
     user = os.environ.get("INSTA_USER", "").strip()
     pw = os.environ.get("INSTA_PASS", "").strip()
