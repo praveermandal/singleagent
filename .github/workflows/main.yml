@@ -1,20 +1,27 @@
-name: Phoenix V50 Ghost
+name: Phoenix V60 Lazarus
 
 on:
-  workflow_dispatch: # Allows manual trigger button
+  workflow_dispatch:      # Manual trigger
+  repository_dispatch:    # Triggered by the loop
+    types: [restart_bot]
   schedule:
-    - cron: '0 */6 * * *' # Auto-runs every 6 hours
+    - cron: '0 */6 * * *' # Backup start (Every 6 hours)
+
+permissions:
+  actions: write
+  contents: read
 
 jobs:
-  build:
+  run-bot:
     runs-on: ubuntu-latest
+    timeout-minutes: 350  # Safety limit (Max 6 hours)
 
     steps:
     - name: Checkout code
-      uses: actions/checkout@v2
+      uses: actions/checkout@v4
 
     - name: Set up Python
-      uses: actions/setup-python@v2
+      uses: actions/setup-python@v4
       with:
         python-version: '3.9'
 
@@ -29,16 +36,27 @@ jobs:
       run: |
         pip install selenium
 
-    - name: Run V50 Ghost Protocol
+    - name: 🔥 Run Phoenix V58 (Adaptive)
+      id: bot_process
+      continue-on-error: true  # Prevents immediate stop if script crashes
       env:
         INSTA_COOKIE: ${{ secrets.INSTA_COOKIE }}
         TARGET_THREAD_ID: ${{ secrets.TARGET_THREAD_ID }}
         MESSAGES: ${{ secrets.MESSAGES }}
       run: python main.py
-      
-    - name: Upload Debug Screenshots (If Crashed)
-      if: always()
+
+    - name: 🔄 The Lazarus Protocol (Auto-Restart)
+      if: always()  # RUNS EVEN IF THE BOT CRASHED
+      env:
+        GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      run: |
+        echo "⚠️ Bot stopped or finished. Initiating restart sequence..."
+        sleep 30  # Wait 30s to prevent rapid-fire API bans
+        gh workflow run python-app.yml
+
+    - name: 📸 Upload Debug Evidence (Only on Failure)
+      if: failure() || steps.bot_process.outcome == 'failure'
       uses: actions/upload-artifact@v4
       with:
-        name: debug-screenshots
+        name: crash-screenshots
         path: "*.png"
