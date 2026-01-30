@@ -11,7 +11,6 @@ from selenium.webdriver.common.keys import Keys
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
-from selenium.webdriver.common.action_chains import ActionChains
 
 # --- CONFIGURATION ---
 THREADS = 2           
@@ -53,7 +52,9 @@ def get_driver(agent_id):
     chrome_options.add_argument("--no-sandbox")
     chrome_options.add_argument("--disable-dev-shm-usage")
     chrome_options.add_argument("--disable-gpu")
-    chrome_options.add_argument("--incognito")
+    
+    # 🚨 V37: NO INCOGNITO (Standard Profile)
+    # We want cookies to stick briefly for the warm-up strategy
     
     # MANUAL MOBILE METRICS (Pixel 5)
     mobile_emulation = {
@@ -62,78 +63,103 @@ def get_driver(agent_id):
     }
     chrome_options.add_experimental_option("mobileEmulation", mobile_emulation)
     chrome_options.add_argument("--disable-blink-features=AutomationControlled")
-    chrome_options.add_argument(f"--user-data-dir=/tmp/chrome_v36_{agent_id}_{random.randint(100,999)}")
+    
+    # Randomize temp folder
+    chrome_options.add_argument(f"--user-data-dir=/tmp/chrome_v37_{agent_id}_{random.randint(100,999)}")
     return webdriver.Chrome(options=chrome_options)
 
-def bypass_blockers(driver, agent_id):
-    """
-    V36: BLIND BYPASS
-    Presses TAB + ENTER repeatedly to clear generic overlays (Cookie walls/App upsells)
-    """
-    log_status(agent_id, "🔨 Attempting Blind Bypass (Tab+Enter)...")
-    try:
-        actions = ActionChains(driver)
-        # Tab 2 times then Enter (Common for 'Allow Cookies' buttons)
-        actions.send_keys(Keys.TAB * 2).send_keys(Keys.ENTER).perform()
-        time.sleep(2)
-        
-        # Try finding 'Log In' link on home page
+def clear_popups(driver):
+    popups = [
+        "//button[text()='Not Now']",
+        "//button[text()='Cancel']",
+        "//div[text()='Not now']",
+        "//button[contains(text(), 'Allow all cookies')]",
+        "//button[contains(text(), 'Decline optional cookies')]"
+    ]
+    for xpath in popups:
         try:
-            login_link = driver.find_element(By.XPATH, "//a[contains(text(), 'Log In')] | //button[contains(text(), 'Log In')]")
-            login_link.click()
-            time.sleep(3)
+            btn = driver.find_element(By.XPATH, xpath)
+            btn.click()
+            time.sleep(1)
         except: pass
-        
-    except: pass
 
-def full_login_flow(driver, agent_id, username, password):
-    log_status(agent_id, "🔑 Navigating to Login...")
-    try:
+def warm_up_and_relogin(driver, agent_id, username, password, cookie):
+    """
+    V37 STRATEGY:
+    1. Inject Cookie -> Refresh (Warm up device trust)
+    2. Logout Manually
+    3. Login with Password
+    """
+    
+    # --- STEP 1: COOKIE WARM UP ---
+    log_status(agent_id, "🍪 Phase 1: Cookie Warm-Up...")
+    driver.get("https://www.instagram.com/")
+    time.sleep(3)
+    
+    if cookie:
+        try:
+            clean_session = cookie.split("sessionid=")[1].split(";")[0] if "sessionid=" in cookie else cookie
+            driver.add_cookie({'name': 'sessionid', 'value': clean_session, 'path': '/'})
+        except:
+            log_status(agent_id, "⚠️ Invalid Cookie Format. Skipping Warm-up.")
+
+    driver.refresh()
+    time.sleep(5)
+    
+    # 📸 SNAPSHOT 1: Did cookie work?
+    driver.save_screenshot(f"debug_1_cookie_result_agent_{agent_id}.png")
+
+    # --- STEP 2: FORCED LOGOUT ---
+    log_status(agent_id, "👋 Phase 2: Forcing Clean Logout...")
+    driver.get("https://www.instagram.com/accounts/logout/")
+    time.sleep(8)
+    
+    # 📸 SNAPSHOT 2: Are we at login page?
+    driver.save_screenshot(f"debug_2_logout_result_agent_{agent_id}.png")
+
+    # --- STEP 3: FRESH LOGIN ---
+    log_status(agent_id, "🔑 Phase 3: Fresh Login Attempt...")
+    
+    # Ensure we are at login URL
+    if "login" not in driver.current_url:
         driver.get("https://www.instagram.com/accounts/login/")
         time.sleep(5)
-        
-        # Check Title
-        log_status(agent_id, f"📄 Page: {driver.title}")
-        
-        # 1. First Attempt to find Username
-        try:
-            user_input = driver.find_element(By.NAME, "username")
-        except:
-            # 🚨 BLOCKED? TRIGGER V36 BYPASS
-            log_status(agent_id, "⚠️ Login field hidden. Running Modal Breaker...")
-            bypass_blockers(driver, agent_id)
-            
-            # Retry finding username
-            try:
-                user_input = WebDriverWait(driver, 10).until(
-                    EC.presence_of_element_located((By.NAME, "username"))
-                )
-            except:
-                log_status(agent_id, "❌ Still Blocked. Dumping Screenshot.")
-                driver.save_screenshot(f"blocked_agent_{agent_id}.png")
-                return False
 
-        # 2. Login Process
+    clear_popups(driver)
+
+    try:
+        user_input = WebDriverWait(driver, 15).until(
+            EC.presence_of_element_located((By.NAME, "username"))
+        )
         user_input.send_keys(username)
         time.sleep(1)
         
         pass_input = driver.find_element(By.NAME, "password")
         pass_input.send_keys(password)
         time.sleep(1)
-        pass_input.send_keys(Keys.ENTER)
+        
+        # Click Login
+        try:
+            driver.find_element(By.XPATH, "//button[@type='submit']").click()
+        except:
+            pass_input.send_keys(Keys.ENTER)
             
         log_status(agent_id, "⏳ Verifying Login...")
-        time.sleep(12)
+        time.sleep(10)
         
-        if "login" in driver.current_url:
-            log_status(agent_id, "❌ Login Failed.")
+        # 📸 SNAPSHOT 3: Did login succeed?
+        driver.save_screenshot(f"debug_3_login_result_agent_{agent_id}.png")
+        
+        if "login" in driver.current_url or "challenge" in driver.current_url:
+            log_status(agent_id, "❌ Login Failed (Challenge or Bad Pass).")
             return False
             
-        log_status(agent_id, "✅ Login Success.")
+        log_status(agent_id, "✅ Login Success!")
         return True
 
     except Exception as e:
         log_status(agent_id, f"❌ Login Exception: {e}")
+        driver.save_screenshot(f"debug_error_login_agent_{agent_id}.png")
         return False
 
 def find_mobile_box(driver):
@@ -148,6 +174,7 @@ def find_mobile_box(driver):
     return None
 
 def mobile_js_inject(driver, element, text):
+    # Safe injection
     driver.execute_script("""
         var elm = arguments[0], txt = arguments[1];
         elm.value = txt;
@@ -163,30 +190,34 @@ def mobile_js_inject(driver, element, text):
     except:
         element.send_keys(Keys.ENTER)
 
-def run_life_cycle(agent_id, user, pw, target, messages):
+def run_life_cycle(agent_id, user, pw, cookie, target, messages):
     driver = None
     sent_in_this_life = 0
     start_time = time.time()
     
     try:
-        log_status(agent_id, "🚀 Phoenix V36 (Modal Breaker)...")
+        log_status(agent_id, "🚀 Phoenix V37 (Warm-Up Protocol)...")
         driver = get_driver(agent_id)
         
-        if not full_login_flow(driver, agent_id, user, pw):
+        # Run the V37 Logic
+        if not warm_up_and_relogin(driver, agent_id, user, pw, cookie):
             return
 
         target_url = f"https://www.instagram.com/direct/t/{target}/"
+        log_status(agent_id, "🔍 Navigating to Target...")
         driver.get(target_url)
         time.sleep(8)
         
-        # Run bypass again just in case 'Use App' popup appears
-        bypass_blockers(driver, agent_id)
-        
+        clear_popups(driver)
         msg_box = find_mobile_box(driver)
         
         if not msg_box:
             log_status(agent_id, "❌ Chat box not found.")
-            driver.save_screenshot(f"box_not_found_agent_{agent_id}.png")
+            # 📸 SNAPSHOT 4: Why is box missing?
+            driver.save_screenshot(f"debug_4_box_missing_agent_{agent_id}.png")
+            
+            if "/inbox" in driver.current_url:
+                log_status(agent_id, "💀 FATAL: Redirected to Inbox. ID is Invalid!")
             return
 
         log_status(agent_id, "✅ Target Locked. Sending...")
@@ -212,23 +243,24 @@ def run_life_cycle(agent_id, user, pw, target, messages):
     finally:
         if driver: driver.quit()
 
-def agent_worker(agent_id, user, pw, target, messages):
+def agent_worker(agent_id, user, pw, cookie, target, messages):
     while True:
-        run_life_cycle(agent_id, user, pw, target, messages)
+        run_life_cycle(agent_id, user, pw, cookie, target, messages)
         time.sleep(10)
 
 def main():
-    with open(LOG_FILE, "w") as f: f.write("PHOENIX V36 START\n")
-    print("🔥 V36 MODAL BREAKER | STANDING BY", flush=True)
+    with open(LOG_FILE, "w") as f: f.write("PHOENIX V37 START\n")
+    print("🔥 V37 WARM-UP PROTOCOL | STANDING BY", flush=True)
     
     user = os.environ.get("INSTA_USER", "").strip()
     pw = os.environ.get("INSTA_PASS", "").strip()
+    cookie = os.environ.get("INSTA_COOKIE", "").strip() # Needed for Warm-up
     target = os.environ.get("TARGET_THREAD_ID", "").strip()
     messages = os.environ.get("MESSAGES", "Hello").split("|")
 
     with ThreadPoolExecutor(max_workers=THREADS) as executor:
         for i in range(THREADS):
-            executor.submit(agent_worker, i+1, user, pw, target, messages)
+            executor.submit(agent_worker, i+1, user, pw, cookie, target, messages)
 
 if __name__ == "__main__":
     main()
