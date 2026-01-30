@@ -12,27 +12,21 @@ from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 
-# --- CONFIGURATION ---
-THREADS = 2           
-BURST_SIZE = 10       
-BURST_DELAY = 1.0     
-CYCLE_DELAY = 2.0     
-SESSION_DURATION = 1200 
+# --- V50 CONFIGURATION ---
+THREADS = 2           # Number of concurrent agents
+BURST_SIZE = 4        # Messages sent per burst
+BURST_SPEED = 0.15    # Delay between messages in a burst (Fast)
+CYCLE_DELAY = 2.5     # Pause between bursts (Safety)
+SESSION_DURATION = 1200 # Max runtime in seconds
 LOG_FILE = "message_log.txt"
 
 GLOBAL_SENT = 0
 COUNTER_LOCK = threading.Lock()
 
-def write_log(msg):
-    try:
-        with open(LOG_FILE, "a") as f: f.write(msg + "\n")
-    except: pass
-
 def log_status(agent_id, msg):
     timestamp = datetime.datetime.now().strftime("%H:%M:%S")
     entry = f"[{timestamp}] 🤖 Agent {agent_id}: {msg}"
     print(entry, flush=True)
-    write_log(entry)
 
 def log_speed(agent_id, current_sent, start_time):
     elapsed = time.time() - start_time
@@ -43,7 +37,6 @@ def log_speed(agent_id, current_sent, start_time):
         total = GLOBAL_SENT
     entry = f"[{timestamp}] ⚡ Agent {agent_id} | Total: {total} | Speed: {speed:.1f} msg/s"
     print(entry, flush=True)
-    write_log(entry)
 
 def get_driver(agent_id):
     chrome_options = Options()
@@ -52,31 +45,47 @@ def get_driver(agent_id):
     chrome_options.add_argument("--disable-dev-shm-usage")
     chrome_options.add_argument("--disable-gpu")
     
+    # 📉 V50 RESOURCE SAVER: BLOCK IMAGES & NOTIFICATIONS
+    prefs = {
+        "profile.managed_default_content_settings.images": 2, # 2 = Block images
+        "profile.default_content_setting_values.notifications": 2,
+        "profile.default_content_setting_values.geolocation": 2
+    }
+    chrome_options.add_experimental_option("prefs", prefs)
+    
+    # STEALTH: Hide Automation Flags
+    chrome_options.add_argument("--disable-blink-features=AutomationControlled")
+    chrome_options.add_experimental_option("excludeSwitches", ["enable-automation"])
+    chrome_options.add_experimental_option('useAutomationExtension', False)
+    
+    # MOBILE EMULATION (Pixel 5)
     mobile_emulation = {
         "deviceMetrics": { "width": 393, "height": 851, "pixelRatio": 3.0 },
         "userAgent": "Mozilla/5.0 (Linux; Android 12; Pixel 5) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/103.0.0.0 Mobile Safari/537.36"
     }
     chrome_options.add_experimental_option("mobileEmulation", mobile_emulation)
-    chrome_options.add_argument("--disable-blink-features=AutomationControlled")
     
-    chrome_options.add_argument(f"--user-data-dir=/tmp/chrome_v48_{agent_id}_{random.randint(100,999)}")
-    return webdriver.Chrome(options=chrome_options)
-
-def clear_overlays(driver):
-    try:
-        driver.execute_script("document.querySelectorAll('div[role=dialog]').forEach(e => e.remove());")
-        popups = ["//button[text()='Not Now']", "//button[text()='Cancel']"]
-        for xpath in popups:
-            try: driver.find_element(By.XPATH, xpath).click()
-            except: pass
-    except: pass
+    # Unique user data dir for each thread
+    chrome_options.add_argument(f"--user-data-dir=/tmp/chrome_v50_{agent_id}_{random.randint(100,999)}")
+    
+    driver = webdriver.Chrome(options=chrome_options)
+    
+    # 👻 CDP PATCH: REMOVE WEBDRIVER FLAG (Anti-Detection)
+    driver.execute_cdp_cmd("Page.addScriptToEvaluateOnNewDocument", {
+        "source": """
+            Object.defineProperty(navigator, 'webdriver', {
+                get: () => undefined
+            });
+        """
+    })
+    
+    return driver
 
 def find_mobile_box(driver):
     selectors = [
         "//textarea", 
         "//div[@role='textbox']",
-        "//div[@contenteditable='true']",
-        "//input[@type='text']"
+        "//div[@contenteditable='true']"
     ]
     for xpath in selectors:
         try: 
@@ -85,20 +94,23 @@ def find_mobile_box(driver):
         except: continue
     return None
 
-def verify_and_send(driver, element, text):
+def ghost_type(driver, element, text):
+    """
+    👻 GHOST TYPE: Physical typing + Immediate Send
+    """
     try:
         element.click()
         element.send_keys(text)
-        time.sleep(0.5)
-        
-        # Click Send
-        btn = driver.find_element(By.XPATH, "//div[contains(text(), 'Send')] | //button[text()='Send']")
-        btn.click()
+        try:
+            # Try clicking the Send button
+            btn = driver.find_element(By.XPATH, "//div[contains(text(), 'Send')] | //button[text()='Send']")
+            btn.click()
+        except:
+            # Fallback to Enter
+            element.send_keys(Keys.ENTER)
         return True
     except:
-        try: element.send_keys(Keys.ENTER)
-        except: pass
-        return True
+        return False
 
 def run_life_cycle(agent_id, cookie, target, messages):
     driver = None
@@ -106,83 +118,71 @@ def run_life_cycle(agent_id, cookie, target, messages):
     start_time = time.time()
     
     try:
-        log_status(agent_id, "🚀 Phoenix V48 (Debugger Mode)...")
+        log_status(agent_id, "🚀 Phoenix V50 (Lightweight Ghost)...")
         driver = get_driver(agent_id)
         
-        # 1. Connectivity Check
-        try:
-            driver.get("https://www.instagram.com/")
-            time.sleep(2)
-        except Exception as e:
-            log_status(agent_id, f"❌ Network Error: Could not reach Instagram. {e}")
-            return
-
-        # 2. Bulletproof Cookie Injection
+        # 1. Load Homepage (Fast because no images)
+        driver.get("https://www.instagram.com/")
+        time.sleep(2)
+        
+        # 2. Inject Cookie
         if cookie:
             try:
-                # Safer parsing logic
-                clean_session = cookie.strip()
-                if "sessionid=" in clean_session:
-                    parts = clean_session.split("sessionid=")
-                    if len(parts) > 1:
-                        clean_session = parts[1].split(";")[0].strip()
+                # Robust parsing
+                clean = cookie.strip()
+                if "sessionid=" in clean:
+                    clean = clean.split("sessionid=")[1].split(";")[0].strip()
                 
-                # Validation
-                if len(clean_session) < 5:
-                    log_status(agent_id, f"❌ Critical: Parsed Session ID is too short: '{clean_session}'")
-                    return
-
                 driver.add_cookie({
                     'name': 'sessionid', 
-                    'value': clean_session, 
+                    'value': clean, 
                     'path': '/', 
                     'domain': '.instagram.com'
                 })
-                # log_status(agent_id, "🍪 Cookie Injected.") 
-            except Exception as e:
-                log_status(agent_id, f"❌ Cookie Injection Failed: {e}")
+            except: 
+                log_status(agent_id, "❌ Cookie Invalid/Parse Error")
                 return
-        else:
-            log_status(agent_id, "❌ No Cookie Provided!")
-            return
         
         driver.refresh()
-        time.sleep(5)
+        time.sleep(3) # Short wait (Lightweight)
         
-        target_url = f"https://www.instagram.com/direct/t/{target}/"
-        log_status(agent_id, "🔍 Navigating to Target...")
-        driver.get(target_url)
-        time.sleep(8)
-        
-        # 3. Check for Redirects (Login Page)
         if "login" in driver.current_url:
-            log_status(agent_id, "💀 FATAL: Redirected to Login. Cookie is EXPIRED or INVALID.")
-            driver.save_screenshot(f"expired_cookie_{agent_id}.png")
+            log_status(agent_id, "💀 Cookie Expired (Redirected to Login).")
             return
 
-        clear_overlays(driver)
+        # 3. Go to Target
+        target_url = f"https://www.instagram.com/direct/t/{target}/"
+        log_status(agent_id, "🔍 Navigating...")
+        driver.get(target_url)
+        time.sleep(5)
+        
+        # 4. Clear Popups (Blindly)
+        try:
+            driver.execute_script("document.querySelectorAll('div[role=dialog]').forEach(e => e.remove());")
+            driver.find_element(By.XPATH, "//button[text()='Not Now']").click()
+        except: pass
         
         msg_box = find_mobile_box(driver)
         
         if not msg_box:
-            log_status(agent_id, f"❌ Box Not Found. URL: {driver.current_url}")
-            driver.save_screenshot(f"box_missing_{agent_id}.png")
+            log_status(agent_id, f"❌ Box not found. URL: {driver.current_url}")
             return
 
-        log_status(agent_id, "✅ Connected. Sending...")
+        log_status(agent_id, "👻 Ghost Active. Sending...")
 
         while (time.time() - start_time) < SESSION_DURATION:
             try:
+                # BURST LOOP
                 for _ in range(BURST_SIZE):
                     msg = random.choice(messages)
-                    verify_and_send(driver, msg_box, f"{msg} ")
+                    ghost_type(driver, msg_box, f"{msg} ")
                     
                     sent_in_this_life += 1
                     with COUNTER_LOCK:
                         global GLOBAL_SENT
                         GLOBAL_SENT += 1
                     
-                    time.sleep(BURST_DELAY)
+                    time.sleep(BURST_SPEED)
                 
                 log_speed(agent_id, sent_in_this_life, start_time)
                 time.sleep(CYCLE_DELAY)
@@ -190,20 +190,26 @@ def run_life_cycle(agent_id, cookie, target, messages):
                 break
 
     except Exception as e:
-        log_status(agent_id, f"❌ Driver Crash: {e}")
+        log_status(agent_id, f"❌ Crash: {e}")
     finally:
         if driver: driver.quit()
 
 def agent_worker(agent_id, cookie, target, messages):
     while True:
         run_life_cycle(agent_id, cookie, target, messages)
-        time.sleep(10) # Increased sleep to stop log spam
+        time.sleep(5)
 
 def main():
-    print("🔥 V48 DEBUGGER MODE | STARTING", flush=True)
+    print("🔥 V50 LIGHTWEIGHT GHOST | NO IMAGES | STEALTH", flush=True)
+    
+    # Load Secrets
     cookie = os.environ.get("INSTA_COOKIE", "").strip()
     target = os.environ.get("TARGET_THREAD_ID", "").strip()
     messages = os.environ.get("MESSAGES", "Hello").split("|")
+
+    if not cookie:
+        print("❌ CRITICAL: INSTA_COOKIE is missing.")
+        return
 
     with ThreadPoolExecutor(max_workers=THREADS) as executor:
         for i in range(THREADS):
