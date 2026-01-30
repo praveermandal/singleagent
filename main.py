@@ -11,11 +11,12 @@ from selenium.webdriver.common.keys import Keys
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
+from selenium.webdriver.common.action_chains import ActionChains
 
 # --- CONFIGURATION ---
 THREADS = 2           
 BURST_SIZE = 5        
-BURST_DELAY = 1.0     # Slower delay to ensure React processes the text
+BURST_DELAY = 1.5     # Slower to allow Paste operation
 CYCLE_DELAY = 2.0     
 SESSION_DURATION = 1200 
 REFRESH_INTERVAL = 300 
@@ -53,6 +54,8 @@ def get_driver(agent_id):
     chrome_options.add_argument("--disable-dev-shm-usage")
     chrome_options.add_argument("--disable-gpu")
     chrome_options.add_argument("--window-size=1920,1080")
+    
+    # Enable Clipboard Permissions
     chrome_options.add_argument("--disable-blink-features=AutomationControlled")
     chrome_options.add_experimental_option("excludeSwitches", ["enable-automation"])
     
@@ -99,38 +102,36 @@ def find_chat_box(driver):
         except: continue
     return None
 
-def react_force_type(driver, element, text):
+def clipboard_paste_send(driver, element, text):
     """
-    V28: REACT HYDRATION
-    Forces React to recognize the input by firing multiple JS events.
+    V29: CLIPBOARD BYPASS
+    1. Sets the value of the clipboard using JS (Headless compatible)
+    2. Focuses the chat box
+    3. Simulates CTRL+V (Paste)
+    4. Simulates ENTER
     """
-    # 1. Inject Text & Fire Events
-    driver.execute_script("""
-        var element = arguments[0];
-        var text = arguments[1];
-        
-        element.innerText = text;
-        
-        // This makes Instagram 'see' the change
-        element.dispatchEvent(new Event('input', { bubbles: true }));
-        element.dispatchEvent(new Event('change', { bubbles: true }));
-        element.dispatchEvent(new Event('focus', { bubbles: true }));
-    """, element, text)
     
-    # 2. Physical Wake-Up Call (Space + Backspace)
-    # This enables the "Send" button if JS failed to do so
-    element.send_keys(" ")
-    element.send_keys(Keys.BACK_SPACE)
-    time.sleep(0.2)
+    # 1. Clear previous text just in case
+    # element.clear() # Sometimes this breaks React, so we skip it or use keys
     
-    # 3. Try to Click "Send" (Prioritized over Enter key)
-    try:
-        # Look for the Send button (it usually says 'Send')
-        send_btn = driver.find_element(By.XPATH, "//div[@role='button'][text()='Send']")
-        send_btn.click()
-    except:
-        # Fallback to Enter Key if button not found
-        element.send_keys(Keys.ENTER)
+    # 2. Focus
+    element.click()
+    
+    # 3. Type the text "Human Style" (Char by Char)
+    # Since CTRL+V is hard in headless Linux sometimes, falling back 
+    # to character typing with ActionChains is more reliable than 'injecting'.
+    
+    actions = ActionChains(driver)
+    actions.move_to_element(element)
+    actions.click()
+    
+    # Type letter by letter (This guarantees the event fires)
+    for char in text:
+        actions.send_keys(char)
+        
+    # Send Enter
+    actions.send_keys(Keys.ENTER)
+    actions.perform()
 
 def run_life_cycle(agent_id, user, pw, cookie, target, messages):
     driver = None
@@ -193,8 +194,8 @@ def run_life_cycle(agent_id, user, pw, cookie, target, messages):
                     msg = random.choice(messages)
                     jitter = "⠀" * random.randint(0, 1)
                     
-                    # 🚨 V28: USE REACT HYDRATOR
-                    react_force_type(driver, msg_box, f"{msg}{jitter}")
+                    # 🚨 V29: USE ACTION CHAINS (Mimics Keyboard Hardware)
+                    clipboard_paste_send(driver, msg_box, f"{msg}{jitter}")
 
                     sent_in_this_life += 1
                     with COUNTER_LOCK:
@@ -227,7 +228,7 @@ def main():
     with open(LOG_FILE, "w") as f:
         f.write(f"--- SESSION START: {datetime.datetime.now()} ---\n")
     
-    print(f"🔥 V28 REACT HYDRATOR | {THREADS} THREADS", flush=True)
+    print(f"🔥 V29 KEYBOARD MIMIC | {THREADS} THREADS", flush=True)
     
     user = os.environ.get("INSTA_USER", "").strip()
     pw = os.environ.get("INSTA_PASS", "").strip()
