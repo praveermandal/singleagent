@@ -3,6 +3,7 @@ import time
 import random
 import datetime
 import shutil
+import threading
 from concurrent.futures import ThreadPoolExecutor
 from selenium import webdriver
 from selenium.webdriver.common.by import By
@@ -11,60 +12,87 @@ from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 
-# --- HYBRID CONFIGURATION ---
+# --- CONFIGURATION ---
 THREADS = 2           
-BURST_SIZE = 8        # Balanced size
-BURST_DELAY = 0.1     # 100ms (Fast but safe)
-CYCLE_DELAY = 1.5     # 1.5s pause
-
-# ♻️ TIMING LOGIC
-SESSION_DURATION = 1200  # 20 Minutes (Full Restart)
-REFRESH_INTERVAL = 300   # 5 Minutes (Page Refresh Only)
+BURST_SIZE = 8        
+BURST_DELAY = 0.15    
+CYCLE_DELAY = 1.2     
+SESSION_DURATION = 1200 
+REFRESH_INTERVAL = 300 
 LOG_FILE = "message_log.txt"
 
-# USER AGENT ROTATION
-USER_AGENTS = [
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36",
-    "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-]
+# GLOBAL COUNTER
+GLOBAL_SENT = 0
+COUNTER_LOCK = threading.Lock()
+
+def write_log(msg):
+    """Writes to file immediately to prevent 'No File Found' errors"""
+    try:
+        with open(LOG_FILE, "a") as f: 
+            f.write(msg + "\n")
+    except: pass
 
 def log_status(agent_id, msg):
     timestamp = datetime.datetime.now().strftime("%H:%M:%S")
-    print(f"[{timestamp}] 🤖 Agent {agent_id}: {msg}", flush=True)
+    entry = f"[{timestamp}] 🤖 Agent {agent_id}: {msg}"
+    print(entry, flush=True)
+    write_log(entry)
 
-def log_speed(agent_id, count, start_time):
+def log_speed(agent_id, current_sent, start_time):
     elapsed = time.time() - start_time
     if elapsed == 0: elapsed = 1
-    speed = count / elapsed
+    speed = current_sent / elapsed
     timestamp = datetime.datetime.now().strftime("%H:%M:%S")
-    entry = f"[{timestamp}] ⚡ Agent {agent_id} | Total: {count} | Speed: {speed:.1f} msg/s"
+    
+    with COUNTER_LOCK:
+        total = GLOBAL_SENT
+        
+    entry = f"[{timestamp}] ⚡ Agent {agent_id} | Session Total: {total} | Speed: {speed:.1f} msg/s"
     print(entry, flush=True)
-    try:
-        with open(LOG_FILE, "a") as f: f.write(entry + "\n")
-    except: pass
+    write_log(entry)
 
 def get_driver(agent_id):
     chrome_options = Options()
     chrome_options.add_argument("--headless")
     chrome_options.add_argument("--no-sandbox")
     chrome_options.add_argument("--disable-dev-shm-usage")
-    
-    # Anti-Detection
+    chrome_options.add_argument("--disable-gpu")
     chrome_options.add_argument("--disable-blink-features=AutomationControlled")
     chrome_options.add_experimental_option("excludeSwitches", ["enable-automation"])
-    chrome_options.add_experimental_option('useAutomationExtension', False)
     chrome_options.add_argument("--blink-settings=imagesEnabled=false")
     
-    # Rotate Identity
-    agent = random.choice(USER_AGENTS)
-    chrome_options.add_argument(f"user-agent={agent}")
-    
-    # Unique Profile
+    chrome_options.add_argument(f"user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/12{agent_id+2}.0.0.0 Safari/537.36")
     chrome_options.add_argument(f"--user-data-dir=/tmp/chrome_p_{agent_id}_{random.randint(1,99999)}")
     
     return webdriver.Chrome(options=chrome_options)
+
+def perform_login(driver, agent_id, username, password):
+    log_status(agent_id, f"⚠️ Session Expired. Attempting Auto-Login for {username}...")
+    try:
+        driver.get("https://www.instagram.com/accounts/login/")
+        time.sleep(6)
+        try: driver.find_element(By.XPATH, "//button[contains(text(), 'Allow')]").click()
+        except: pass
+
+        user_input = WebDriverWait(driver, 10).until(EC.presence_of_element_located((By.NAME, "username")))
+        user_input.send_keys(username)
+        pass_input = driver.find_element(By.NAME, "password")
+        pass_input.send_keys(password)
+        time.sleep(1)
+        pass_input.send_keys(Keys.ENTER)
+        
+        log_status(agent_id, "🔐 Login submitted. Waiting 12s...")
+        time.sleep(12)
+        
+        if "login" not in driver.current_url:
+            log_status(agent_id, "✅ Auto-Login Successful!")
+            return True
+        else:
+            log_status(agent_id, "❌ Login Failed.")
+            return False
+    except Exception as e:
+        log_status(agent_id, f"❌ Login Error: {e}")
+        return False
 
 def instant_inject(driver, element, text):
     driver.execute_script("""
@@ -74,52 +102,44 @@ def instant_inject(driver, element, text):
         elm.dispatchEvent(new Event('input', {bubbles: true}));
     """, element, text)
 
-def run_life_cycle(agent_id, session_id, target_input, messages):
+def run_life_cycle(agent_id, user, pw, cookie, target, messages):
     driver = None
     sent_in_this_life = 0
     session_start_time = time.time()
     last_refresh_time = time.time()
     
     try:
-        log_status(agent_id, "🔥 Starting Hybrid Session (20m)...")
+        log_status(agent_id, "🚀 Phoenix Rising...")
         driver = get_driver(agent_id)
         
-        # Login
         driver.get("https://www.instagram.com/404") 
-        clean_session = session_id.split("sessionid=")[1].split(";")[0] if "sessionid=" in session_id else session_id
-        driver.add_cookie({'name': 'sessionid', 'value': clean_session, 'domain': '.instagram.com', 'path': '/'})
+        if cookie:
+            clean_session = cookie.split("sessionid=")[1].split(";")[0] if "sessionid=" in cookie else cookie
+            driver.add_cookie({'name': 'sessionid', 'value': clean_session, 'domain': '.instagram.com', 'path': '/'})
+        
         driver.refresh()
         time.sleep(5)
 
-        # Check Login
-        driver.get(f"https://www.instagram.com/direct/t/{target_input}/")
+        driver.get(f"https://www.instagram.com/direct/t/{target}/")
         time.sleep(5)
         
         if "login" in driver.current_url:
-            log_status(agent_id, "⚠️ Session Expired. Stopping.")
-            return
+            if not perform_login(driver, agent_id, user, pw):
+                return
+            driver.get(f"https://www.instagram.com/direct/t/{target}/")
+            time.sleep(5)
 
         box_xpath = "//div[@contenteditable='true']"
-        try:
-            msg_box = WebDriverWait(driver, 20).until(EC.presence_of_element_located((By.XPATH, box_xpath)))
-        except:
-             return
+        msg_box = WebDriverWait(driver, 20).until(EC.presence_of_element_located((By.XPATH, box_xpath)))
 
-        # --- THE HYBRID LOOP ---
         while (time.time() - session_start_time) < SESSION_DURATION:
-            
-            # 1. RAM CHECK: Has it been 5 minutes?
             if (time.time() - last_refresh_time) > REFRESH_INTERVAL:
-                log_status(agent_id, "♻️ 5-Minute RAM Flush (Soft Refresh)...")
+                log_status(agent_id, "♻️ RAM Soft Refresh...")
                 driver.refresh()
                 time.sleep(5)
-                try:
-                    msg_box = WebDriverWait(driver, 20).until(EC.presence_of_element_located((By.XPATH, box_xpath)))
-                except:
-                    break
+                msg_box = WebDriverWait(driver, 20).until(EC.presence_of_element_located((By.XPATH, box_xpath)))
                 last_refresh_time = time.time()
 
-            # 2. SEND MESSAGES
             try:
                 for _ in range(BURST_SIZE):
                     msg = random.choice(messages)
@@ -127,15 +147,15 @@ def run_life_cycle(agent_id, session_id, target_input, messages):
                     instant_inject(driver, msg_box, f"{msg}{jitter}")
                     msg_box.send_keys(Keys.ENTER)
                     sent_in_this_life += 1
-                    time.sleep(BURST_DELAY)
+                    with COUNTER_LOCK:
+                        global GLOBAL_SENT
+                        GLOBAL_SENT += 1
+                    time.sleep(random.uniform(0.12, 0.20))
                 
                 log_speed(agent_id, sent_in_this_life, session_start_time)
                 time.sleep(CYCLE_DELAY)
-
             except Exception:
-                # If element becomes stale, force a refresh loop
-                last_refresh_time = 0 
-                time.sleep(1)
+                break 
 
     except Exception as e:
         log_status(agent_id, f"Error: {e}")
@@ -146,23 +166,34 @@ def run_life_cycle(agent_id, session_id, target_input, messages):
         try: shutil.rmtree(f"/tmp/chrome_p_{agent_id}", ignore_errors=True)
         except: pass
 
-def agent_worker(agent_id, session_id, target_input, messages):
+def agent_worker(agent_id, user, pw, cookie, target, messages):
     while True:
-        run_life_cycle(agent_id, session_id, target_input, messages)
-        time.sleep(10) 
+        run_life_cycle(agent_id, user, pw, cookie, target, messages)
+        time.sleep(5)
 
 def main():
-    print(f"🚀 V19.1 HYBRID | REFRESH 5m | RESTART 20m", flush=True)
+    # 🚨 CRITICAL FIX: Create file immediately on start
+    with open(LOG_FILE, "w") as f:
+        f.write(f"--- SESSION START: {datetime.datetime.now()} ---\n")
     
-    session_id = os.environ.get("INSTA_SESSION", "").strip()
-    target_input = os.environ.get("TARGET_THREAD_ID", "").strip()
+    print(f"🔥 V22.2 LOG FIX | {THREADS} THREADS", flush=True)
+    
+    user = os.environ.get("INSTA_USER", "").strip()
+    pw = os.environ.get("INSTA_PASS", "").strip()
+    cookie = os.environ.get("INSTA_COOKIE", "").strip()
+    target = os.environ.get("TARGET_THREAD_ID", "").strip()
     messages = os.environ.get("MESSAGES", "Hello").split("|")
 
-    if not session_id: return
+    # Log specific errors to file if vars are missing
+    if not user or not pw: 
+        err = "❌ CRITICAL ERROR: INSTA_USER or INSTA_PASS is missing from Secrets!"
+        print(err)
+        write_log(err)
+        return
 
     with ThreadPoolExecutor(max_workers=THREADS) as executor:
         for i in range(THREADS):
-            executor.submit(agent_worker, i+1, session_id, target_input, messages)
+            executor.submit(agent_worker, i+1, user, pw, cookie, target, messages)
 
 if __name__ == "__main__":
     main()
