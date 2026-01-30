@@ -54,11 +54,15 @@ def get_driver(agent_id):
     chrome_options.add_argument("--disable-dev-shm-usage")
     chrome_options.add_argument("--disable-gpu")
     
-    # 🚨 V30: ACTIVATE MOBILE MODE (Pixel 5)
-    mobile_emulation = { "deviceName": "Pixel 5" }
+    # 🚨 V31: MANUAL MOBILE METRICS (Universal Fix)
+    # We define the screen size manually so it never fails
+    mobile_emulation = {
+        "deviceMetrics": { "width": 393, "height": 851, "pixelRatio": 3.0 },
+        "userAgent": "Mozilla/5.0 (Linux; Android 11; Pixel 5) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/90.0.4430.91 Mobile Safari/537.36"
+    }
     chrome_options.add_experimental_option("mobileEmulation", mobile_emulation)
     
-    # Fix for Automation Detection
+    # Hide Automation Flags
     chrome_options.add_argument("--disable-blink-features=AutomationControlled")
     chrome_options.add_experimental_option("excludeSwitches", ["enable-automation"])
     
@@ -71,7 +75,7 @@ def perform_login(driver, agent_id, username, password):
         driver.get("https://www.instagram.com/accounts/login/")
         time.sleep(6)
         
-        # Mobile Login often has different buttons
+        # Mobile Login Button Check
         try: driver.find_element(By.XPATH, "//button[contains(text(), 'Log In')]").click()
         except: pass
 
@@ -96,12 +100,8 @@ def perform_login(driver, agent_id, username, password):
         return False
 
 def find_mobile_box(driver):
-    """
-    V30: MOBILE SELECTORS
-    Mobile Instagram uses textareas instead of contenteditable divs.
-    """
     selectors = [
-        "//textarea", # Standard Mobile Input
+        "//textarea", 
         "//textarea[contains(@placeholder, 'Message...')]",
         "//div[@role='textbox']"
     ]
@@ -112,21 +112,21 @@ def find_mobile_box(driver):
 
 def mobile_send_logic(driver, element, text):
     """
-    V30: MOBILE SEND
+    Mobile Send Logic:
     1. Click Text Area
-    2. Send Keys (Works better on Mobile view)
-    3. Click the specific 'Send' text button that appears
+    2. Type text
+    3. Click the 'Send' text button (common on mobile view)
     """
     element.click()
     element.send_keys(text)
-    time.sleep(0.5) # Wait for 'Send' button to light up
+    time.sleep(0.5) 
     
     try:
-        # On Mobile, the Send button is often just text "Send"
+        # On Mobile, Look for the text "Send"
         send_btn = driver.find_element(By.XPATH, "//div[contains(text(), 'Send')]")
         send_btn.click()
     except:
-        # Fallback to Enter
+        # Fallback to Enter key
         element.send_keys(Keys.ENTER)
 
 def run_life_cycle(agent_id, user, pw, cookie, target, messages):
@@ -136,7 +136,7 @@ def run_life_cycle(agent_id, user, pw, cookie, target, messages):
     last_refresh_time = time.time()
     
     try:
-        log_status(agent_id, "🚀 Phoenix Rising (Mobile Mode)...")
+        log_status(agent_id, "🚀 Phoenix Rising (Manual Mobile Mode)...")
         driver = get_driver(agent_id)
         
         driver.get("https://www.instagram.com/")
@@ -154,7 +154,7 @@ def run_life_cycle(agent_id, user, pw, cookie, target, messages):
         driver.get(target_url)
         time.sleep(5)
         
-        # Clear 'Use the App' Popups common on mobile
+        # Clear Mobile App Popups
         try: driver.find_element(By.XPATH, "//button[text()='Not Now']").click()
         except: pass
         try: driver.find_element(By.XPATH, "//button[contains(text(), 'Cancel')]").click()
@@ -186,7 +186,7 @@ def run_life_cycle(agent_id, user, pw, cookie, target, messages):
             try:
                 for _ in range(BURST_SIZE):
                     msg = random.choice(messages)
-                    jitter = " " # Simple space jitter for mobile
+                    jitter = " " 
                     
                     mobile_send_logic(driver, msg_box, f"{msg}{jitter}")
 
@@ -223,7 +223,7 @@ def main():
     with open(LOG_FILE, "w") as f:
         f.write(f"--- SESSION START: {datetime.datetime.now()} ---\n")
     
-    print(f"🔥 V30 MOBILE EMULATION | {THREADS} THREADS", flush=True)
+    print(f"🔥 V31 UNIVERSAL MOBILE | {THREADS} THREADS", flush=True)
     
     user = os.environ.get("INSTA_USER", "").strip()
     pw = os.environ.get("INSTA_PASS", "").strip()
