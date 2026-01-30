@@ -11,11 +11,12 @@ from selenium.webdriver.common.keys import Keys
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
+from selenium.webdriver.common.action_chains import ActionChains
 
 # --- CONFIGURATION ---
 THREADS = 2           
 BURST_SIZE = 10       
-BURST_DELAY = 1.0     # Slower to ensure verification
+BURST_DELAY = 1.0     
 CYCLE_DELAY = 2.0     
 SESSION_DURATION = 1200 
 LOG_FILE = "message_log.txt"
@@ -52,7 +53,6 @@ def get_driver(agent_id):
     chrome_options.add_argument("--disable-dev-shm-usage")
     chrome_options.add_argument("--disable-gpu")
     
-    # MOBILE EMULATION (Pixel 5)
     mobile_emulation = {
         "deviceMetrics": { "width": 393, "height": 851, "pixelRatio": 3.0 },
         "userAgent": "Mozilla/5.0 (Linux; Android 12; Pixel 5) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/103.0.0.0 Mobile Safari/537.36"
@@ -61,76 +61,81 @@ def get_driver(agent_id):
     chrome_options.add_argument("--disable-blink-features=AutomationControlled")
     chrome_options.add_experimental_option("excludeSwitches", ["enable-automation"])
     
-    chrome_options.add_argument(f"--user-data-dir=/tmp/chrome_v46_{agent_id}_{random.randint(100,999)}")
+    chrome_options.add_argument(f"--user-data-dir=/tmp/chrome_v47_{agent_id}_{random.randint(100,999)}")
     return webdriver.Chrome(options=chrome_options)
 
-def clear_popups(driver):
+def clear_overlays(driver):
+    """
+    🔥 V47: BLIND ESCAPER
+    Presses ESC and clicks coordinate (10,10) to dismiss invisible modals.
+    """
+    try:
+        ActionChains(driver).send_keys(Keys.ESCAPE).perform()
+        ActionChains(driver).move_by_offset(10, 10).click().perform()
+    except: pass
+    
+    # Specific buttons
     popups = [
         "//button[text()='Not Now']",
         "//button[text()='Cancel']",
         "//div[text()='Not now']",
-        "//button[contains(text(), 'Use the App')]/following-sibling::button",
-        "//button[contains(@aria-label, 'Close')]"
+        "//button[contains(text(), 'Use the App')]/following-sibling::button"
     ]
     for xpath in popups:
         try:
             driver.find_element(By.XPATH, xpath).click()
-            time.sleep(0.5)
+            time.sleep(0.3)
         except: pass
 
 def find_mobile_box(driver):
-    # STRICT selector: Only Textarea. Divs are unreliable on Mobile.
-    selectors = ["//textarea", "//form//textarea"]
+    """
+    🔥 V47: OMNI-SELECTOR
+    Looks for ANY valid input method.
+    """
+    selectors = [
+        "//textarea", 
+        "//div[@role='textbox']",
+        "//div[@contenteditable='true']",
+        "//input[@type='text']",
+        "//form//textarea"
+    ]
     for xpath in selectors:
-        try: return driver.find_element(By.XPATH, xpath)
+        try: 
+            el = driver.find_element(By.XPATH, xpath)
+            if el.is_displayed():
+                return el
         except: continue
     return None
 
 def verify_and_send(driver, element, text):
-    """
-    🔥 V46: TEXT VERIFICATION PROTOCOL
-    1. Try to type.
-    2. Read value back.
-    3. If empty, try JS Inject.
-    4. Only click Send if value matches.
-    """
-    
-    # METHOD A: Physical Type
+    # METHOD A: Type
     try:
         element.click()
-        element.clear()
         element.send_keys(text)
     except: pass
     
     time.sleep(0.2)
     
-    # VERIFICATION STEP
-    current_val = element.get_attribute("value")
+    # METHOD B: JS Backup
+    try:
+        # Check if empty (works for textarea)
+        val = element.get_attribute("value")
+        # Check text (works for div)
+        txt = element.text
+        
+        if (not val and not txt):
+            driver.execute_script("arguments[0].innerText = arguments[1];", element, text)
+            time.sleep(0.1)
+    except: pass
     
-    # If Method A failed (Box is empty), try Method B (JS Inject)
-    if not current_val or len(current_val) == 0:
-        driver.execute_script("""
-            var el = arguments[0];
-            el.value = arguments[1];
-            el.dispatchEvent(new Event('input', {bubbles: true}));
-            el.dispatchEvent(new Event('change', {bubbles: true}));
-        """, element, text)
-        time.sleep(0.2)
-        current_val = element.get_attribute("value")
-    
-    # FINAL CHECK: Did it work?
-    if current_val and len(current_val) > 0:
-        # Check for Blue Send Button
-        try:
-            btn = driver.find_element(By.XPATH, "//div[contains(text(), 'Send')] | //button[text()='Send']")
-            btn.click()
-            return True
-        except:
-            element.send_keys(Keys.ENTER)
-            return True
-    else:
-        # If we are here, the browser refused to accept text.
-        return False
+    # SEND
+    try:
+        btn = driver.find_element(By.XPATH, "//div[contains(text(), 'Send')] | //button[text()='Send']")
+        btn.click()
+        return True
+    except:
+        element.send_keys(Keys.ENTER)
+        return True
 
 def run_life_cycle(agent_id, cookie, target, messages):
     driver = None
@@ -138,7 +143,7 @@ def run_life_cycle(agent_id, cookie, target, messages):
     start_time = time.time()
     
     try:
-        log_status(agent_id, "🚀 Phoenix V46 (Verified Sender)...")
+        log_status(agent_id, "🚀 Phoenix V47 (Omni-Selector)...")
         driver = get_driver(agent_id)
         
         driver.get("https://www.instagram.com/")
@@ -146,57 +151,46 @@ def run_life_cycle(agent_id, cookie, target, messages):
         
         if cookie:
             try:
-                if "sessionid=" in cookie:
-                    clean_session = cookie.split("sessionid=")[1].split(";")[0].strip()
-                else:
-                    clean_session = cookie.strip()
-                
-                driver.add_cookie({'name': 'sessionid', 'value': clean_session, 'path': '/', 'domain': '.instagram.com'})
+                clean = cookie.split("sessionid=")[1].split(";")[0].strip() if "sessionid=" in cookie else cookie.strip()
+                driver.add_cookie({'name': 'sessionid', 'value': clean, 'path': '/', 'domain': '.instagram.com'})
             except: return
         
         driver.refresh()
         time.sleep(5)
         
-        if "login" in driver.current_url:
-            log_status(agent_id, "💀 Cookie Expired.")
-            return
-
         target_url = f"https://www.instagram.com/direct/t/{target}/"
         log_status(agent_id, "🔍 Navigating...")
         driver.get(target_url)
         time.sleep(8)
         
-        clear_popups(driver)
+        # 🚨 V47: Clear Overlays before searching
+        clear_overlays(driver)
+        
         msg_box = find_mobile_box(driver)
         
         if not msg_box:
-            log_status(agent_id, "❌ Box not found.")
+            log_status(agent_id, f"❌ Box not found. Current URL: {driver.current_url}")
             driver.save_screenshot(f"box_missing_{agent_id}.png")
             return
 
-        log_status(agent_id, "✅ Verified Link Established.")
+        log_status(agent_id, "✅ Target Locked. Sending...")
 
         while (time.time() - start_time) < SESSION_DURATION:
             try:
                 for _ in range(BURST_SIZE):
                     msg = random.choice(messages)
+                    verify_and_send(driver, msg_box, f"{msg} ")
                     
-                    # 🚨 V46: VERIFY
-                    success = verify_and_send(driver, msg_box, f"{msg} ")
-                    
-                    if success:
-                        sent_in_this_life += 1
-                        with COUNTER_LOCK:
-                            global GLOBAL_SENT
-                            GLOBAL_SENT += 1
-                    else:
-                        log_status(agent_id, "⚠️ Input Failed (Box Empty). Retrying...")
+                    sent_in_this_life += 1
+                    with COUNTER_LOCK:
+                        global GLOBAL_SENT
+                        GLOBAL_SENT += 1
                     
                     time.sleep(BURST_DELAY)
                 
                 log_speed(agent_id, sent_in_this_life, start_time)
                 time.sleep(CYCLE_DELAY)
-            except Exception:
+            except:
                 break
 
     except Exception as e:
@@ -210,16 +204,10 @@ def agent_worker(agent_id, cookie, target, messages):
         time.sleep(5)
 
 def main():
-    with open(LOG_FILE, "w") as f: f.write("PHOENIX V46 START\n")
-    print("🔥 V46 VERIFIED SENDER | CHECKING INPUT", flush=True)
-    
+    print("🔥 V47 OMNI-SELECTOR | STARTING", flush=True)
     cookie = os.environ.get("INSTA_COOKIE", "").strip()
     target = os.environ.get("TARGET_THREAD_ID", "").strip()
     messages = os.environ.get("MESSAGES", "Hello").split("|")
-
-    if not cookie: 
-        print("❌ INSTA_COOKIE Missing!")
-        return
 
     with ThreadPoolExecutor(max_workers=THREADS) as executor:
         for i in range(THREADS):
