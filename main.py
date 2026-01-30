@@ -53,7 +53,9 @@ def get_driver(agent_id):
     chrome_options.add_argument("--no-sandbox")
     chrome_options.add_argument("--disable-dev-shm-usage")
     chrome_options.add_argument("--disable-gpu")
-    chrome_options.add_argument("--incognito") # 🚨 V35: Force clean slate
+    
+    # 🚨 V35 FIX: INCOGNITO & CLEAN PROFILE
+    chrome_options.add_argument("--incognito")
     
     # MANUAL MOBILE METRICS (Pixel 5)
     mobile_emulation = {
@@ -63,7 +65,7 @@ def get_driver(agent_id):
     chrome_options.add_experimental_option("mobileEmulation", mobile_emulation)
     chrome_options.add_argument("--disable-blink-features=AutomationControlled")
     
-    # Randomize temp folder to prevent lock-file errors
+    # Randomized temp folder to ensure no cache overlap
     chrome_options.add_argument(f"--user-data-dir=/tmp/chrome_v35_{agent_id}_{random.randint(100,999)}")
     return webdriver.Chrome(options=chrome_options)
 
@@ -72,7 +74,7 @@ def clear_popups(driver, agent_id):
         "//button[text()='Not Now']",
         "//button[text()='Cancel']",
         "//div[text()='Not now']",
-        "//button[contains(text(), 'Allow all cookies')]", # 🚨 Essential for Login
+        "//button[contains(text(), 'Allow all cookies')]", # Essential for login
         "//button[contains(text(), 'Decline optional cookies')]"
     ]
     for xpath in popups:
@@ -85,11 +87,14 @@ def clear_popups(driver, agent_id):
 def full_login_flow(driver, agent_id, username, password):
     log_status(agent_id, "🔑 Navigating to Clean Login Page...")
     try:
-        # 🚨 V35: Use a clean URL without redirect params to lower security flags
+        # 🚨 V35 FIX: Clean URL (No redirects)
         driver.get("https://www.instagram.com/accounts/login/")
         time.sleep(7)
         
-        # Check for Cookie Consent blocking the UI
+        # Check title to see if page loaded
+        log_status(agent_id, f"📄 Page Title: {driver.title}")
+        
+        # Check for Cookie Consent
         clear_popups(driver, agent_id)
 
         # 1. Wait for Username Field
@@ -100,8 +105,9 @@ def full_login_flow(driver, agent_id, username, password):
             user_input.send_keys(username)
             time.sleep(random.uniform(1, 2))
         except:
-            log_status(agent_id, "❌ Login fields not visible. (Blocked by Captcha or Consent)")
-            driver.save_screenshot(f"login_blocked_agent_{agent_id}.png")
+            # 📸 DEBUG: If this fails, we need to know why
+            log_status(agent_id, "❌ Timeout: Username field not found. Dumping page source...")
+            driver.save_screenshot(f"login_timeout_agent_{agent_id}.png")
             return False
 
         # 2. Enter Password
@@ -158,7 +164,7 @@ def run_life_cycle(agent_id, user, pw, target, messages):
     start_time = time.time()
     
     try:
-        log_status(agent_id, "🚀 Phoenix V35 Booting...")
+        log_status(agent_id, "🚀 Phoenix V35.1 Booting...")
         driver = get_driver(agent_id)
         
         if not full_login_flow(driver, agent_id, user, pw):
@@ -172,7 +178,7 @@ def run_life_cycle(agent_id, user, pw, target, messages):
         msg_box = find_mobile_box(driver)
         
         if not msg_box:
-            log_status(agent_id, "❌ Chat box not found. Finalizing Screenshot.")
+            log_status(agent_id, "❌ Chat box not found.")
             driver.save_screenshot(f"box_not_found_agent_{agent_id}.png")
             return
 
@@ -205,8 +211,8 @@ def agent_worker(agent_id, user, pw, target, messages):
         time.sleep(10)
 
 def main():
-    with open(LOG_FILE, "w") as f: f.write("PHOENIX V35 START\n")
-    print("🔥 V35 IDENTITY MASK | STANDING BY", flush=True)
+    with open(LOG_FILE, "w") as f: f.write("PHOENIX V35.1 START\n")
+    print("🔥 V35.1 IDENTITY MASK | STANDING BY", flush=True)
     
     user = os.environ.get("INSTA_USER", "").strip()
     pw = os.environ.get("INSTA_PASS", "").strip()
