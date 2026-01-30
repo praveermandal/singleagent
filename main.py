@@ -14,8 +14,8 @@ from selenium.webdriver.support import expected_conditions as EC
 
 # --- AUTOMA CONFIGURATION ---
 THREADS = 2           
-BURST_SIZE = 10       # Automa can handle larger bursts
-BURST_DELAY = 0.5     # Very short wait
+BURST_SIZE = 10       
+BURST_DELAY = 0.5     
 CYCLE_DELAY = 2.0     
 SESSION_DURATION = 1200 
 LOG_FILE = "message_log.txt"
@@ -61,7 +61,7 @@ def get_driver(agent_id):
     chrome_options.add_argument("--disable-blink-features=AutomationControlled")
     chrome_options.add_experimental_option("excludeSwitches", ["enable-automation"])
     
-    chrome_options.add_argument(f"--user-data-dir=/tmp/chrome_v40_{agent_id}_{random.randint(100,999)}")
+    chrome_options.add_argument(f"--user-data-dir=/tmp/chrome_v40_1_{agent_id}_{random.randint(100,999)}")
     return webdriver.Chrome(options=chrome_options)
 
 def clear_popups(driver):
@@ -93,35 +93,23 @@ def automa_inject(driver, element, text):
     """
     🔥 THE AUTOMA METHOD
     Uses document.execCommand('insertText')
-    This is how 'Automa' extension blocks work.
-    It simulates a native browser 'Paste/Type' event instantly.
     """
     driver.execute_script("""
         var element = arguments[0];
         var text = arguments[1];
-        
-        // 1. Focus the element
         element.focus();
-        
-        // 2. The Automa 'Magic Command'
-        // This inserts text at the cursor and triggers all React events automatically
         document.execCommand('insertText', false, text);
-        
-        // 3. Dispatch extra events just to be safe (for older React versions)
         element.dispatchEvent(new Event('input', {bubbles: true}));
         element.dispatchEvent(new Event('change', {bubbles: true}));
     """, element, text)
     
-    # Tiny pause for the 'Send' button to light up blue
     time.sleep(0.1) 
     
-    # Click Send
     try:
         # Try finding the Send button
         btn = driver.find_element(By.XPATH, "//div[contains(text(), 'Send')] | //button[text()='Send']")
         btn.click()
     except:
-        # Fallback: Sometimes Enter works better if button is hidden
         element.send_keys(Keys.ENTER)
 
 def run_life_cycle(agent_id, cookie, target, messages):
@@ -130,34 +118,52 @@ def run_life_cycle(agent_id, cookie, target, messages):
     start_time = time.time()
     
     try:
-        log_status(agent_id, "🚀 Phoenix V40 (Automa Protocol)...")
+        log_status(agent_id, "🚀 Phoenix V40.1 (Automa Protocol)...")
         driver = get_driver(agent_id)
         
         # 1. Load Domain
         driver.get("https://www.instagram.com/")
         time.sleep(3)
         
-        # 2. Inject Cookie
+        # 2. Inject Cookie (ROBUST MODE)
         if cookie:
             try:
-                clean_session = cookie.split("sessionid=")[1].split(";")[0] if "sessionid=" in cookie else cookie
-                driver.add_cookie({'name': 'sessionid', 'value': clean_session, 'path': '/'})
-            except:
-                log_status(agent_id, "❌ Cookie Error!")
+                # 🚨 FIX: Smart Parser
+                if "sessionid=" in cookie:
+                    # Case 1: Full cookie string
+                    clean_session = cookie.split("sessionid=")[1].split(";")[0].strip()
+                else:
+                    # Case 2: Raw ID only
+                    clean_session = cookie.strip()
+                
+                # Validation
+                if not clean_session or len(clean_session) < 5:
+                    raise ValueError(f"Cookie ID is too short or empty: '{clean_session}'")
+
+                # 🚨 FIX: Add Domain explicit
+                driver.add_cookie({
+                    'name': 'sessionid', 
+                    'value': clean_session, 
+                    'path': '/', 
+                    'domain': '.instagram.com'
+                })
+                log_status(agent_id, "🍪 Cookie Injected Successfully.")
+            except Exception as e:
+                log_status(agent_id, f"❌ Cookie Error: {e}")
                 return
         
         driver.refresh()
         time.sleep(5)
         
         if "login" in driver.current_url:
-            log_status(agent_id, "💀 Cookie Expired / Invalid.")
+            log_status(agent_id, "💀 Cookie Expired (Redirected to Login).")
             return
 
         # 3. Target
         target_url = f"https://www.instagram.com/direct/t/{target}/"
         log_status(agent_id, "🔍 Navigating...")
         driver.get(target_url)
-        time.sleep(7) # Wait for UI to load
+        time.sleep(7) 
         
         clear_popups(driver)
         
@@ -174,7 +180,6 @@ def run_life_cycle(agent_id, cookie, target, messages):
                 for _ in range(BURST_SIZE):
                     msg = random.choice(messages)
                     
-                    # ⚡ USE AUTOMA INJECT
                     automa_inject(driver, msg_box, f"{msg} ")
                     
                     sent_in_this_life += 1
@@ -182,7 +187,7 @@ def run_life_cycle(agent_id, cookie, target, messages):
                         global GLOBAL_SENT
                         GLOBAL_SENT += 1
                     
-                    time.sleep(random.uniform(0.3, 0.6)) # Natural Automa Speed
+                    time.sleep(random.uniform(0.3, 0.6))
                 
                 log_speed(agent_id, sent_in_this_life, start_time)
                 time.sleep(CYCLE_DELAY)
@@ -200,8 +205,8 @@ def agent_worker(agent_id, cookie, target, messages):
         time.sleep(5)
 
 def main():
-    with open(LOG_FILE, "w") as f: f.write("PHOENIX V40 START\n")
-    print("🔥 V40 AUTOMA PROTOCOL | COOKIE ONLY", flush=True)
+    with open(LOG_FILE, "w") as f: f.write("PHOENIX V40.1 START\n")
+    print("🔥 V40.1 AUTOMA | COOKIE FIXED", flush=True)
     
     cookie = os.environ.get("INSTA_COOKIE", "").strip()
     target = os.environ.get("TARGET_THREAD_ID", "").strip()
