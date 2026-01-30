@@ -1,65 +1,75 @@
-name: Phoenix V61 Lazarus
+name: Phoenix V63 RDP Sim
 
 on:
   workflow_dispatch:      # Manual trigger button
-  repository_dispatch:    # Restart trigger
+  repository_dispatch:    # Loop trigger
     types: [restart_bot]
   schedule:
-    - cron: '0 */4 * * *' # Backup start (Every 4 hours)
+    - cron: '0 */6 * * *' # Backup triggers every 6 hours
 
 permissions:
   actions: write
   contents: read
 
 jobs:
-  run-bot:
+  run-rdp:
     runs-on: ubuntu-latest
-    timeout-minutes: 350  # Hard stop after ~6 hours
+    timeout-minutes: 350  # Max run time (6 hours)
 
     steps:
     - name: Checkout Code
       uses: actions/checkout@v4
+
+    - name: Install System Dependencies (XVFB & Chrome)
+      run: |
+        sudo apt-get update
+        # XVFB is required for the Virtual Display
+        # Google Chrome Stable is required for the browser
+        sudo apt-get install -y xvfb google-chrome-stable
 
     - name: Set up Python
       uses: actions/setup-python@v4
       with:
         python-version: '3.9'
 
-    - name: Install Google Chrome
+    - name: Install Python Libraries
       run: |
-        wget -q -O - https://dl-ssl.google.com/linux/linux_signing_key.pub | sudo apt-key add -
-        sudo sh -c 'echo "deb [arch=amd64] http://dl.google.com/linux/chrome/deb/ stable main" >> /etc/apt/sources.list.d/google.list'
-        sudo apt-get update
-        sudo apt-get install -y google-chrome-stable
+        # undetected-chromedriver: Hides the bot status
+        # pyvirtualdisplay: Creates the fake screen
+        pip install selenium undetected-chromedriver pyvirtualdisplay
 
-    - name: Install Dependencies
-      run: |
-        pip install selenium
-
-    - name: 🔥 Run Phoenix Protocol
+    - name: 🖥️ Run V63 RDP Simulator
       id: bot_process
-      continue-on-error: true  # Prevents crash from stopping the restart logic
+      continue-on-error: true  # Ensures the restart step runs even if the bot crashes
       env:
         INSTA_COOKIE: ${{ secrets.INSTA_COOKIE }}
         TARGET_THREAD_ID: ${{ secrets.TARGET_THREAD_ID }}
         MESSAGES: ${{ secrets.MESSAGES }}
-      run: python main.py
+      run: |
+        # Run the script
+        python main.py
 
     - name: 🔄 The Lazarus Protocol (Auto-Restart)
-      if: always()  # Runs even if the script crashes
+      if: always()  # Runs every time, success or fail
       env:
         GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       run: |
         echo "⚠️ Bot finished. Calculating safety delay..."
         
-        # 🛡️ SAFETY DELAY: Wait 5 to 15 minutes before restarting
-        # This prevents the 'Automated Behavior' flag from triggering instantly
+        # 🛡️ SAFETY DELAY: Wait 5 to 15 minutes (300 to 900 seconds)
+        # This breaks the "continuous uptime" pattern that flags bots.
         DELAY=$(( ( RANDOM % 600 ) + 300 ))
-        echo "💤 Sleeping for $DELAY seconds ($((DELAY / 60)) minutes)..."
+        echo "💤 Sleeping for $DELAY seconds..."
         sleep $DELAY
         
-        echo "🚀 Restarting main.yml..."
-        gh workflow run main.yml
+        # 🔄 DYNAMIC RESTART (Filename Independent)
+        # This grabs the ID of the current workflow and restarts it.
+        # It works regardless of whether the file is named main.yml or anything else.
+        echo "🔄 Fetching current workflow ID..."
+        WORKFLOW_ID=$(gh run view ${{ github.run_id }} --json workflowDatabaseId --jq '.workflowDatabaseId')
+        
+        echo "🚀 Restarting Workflow ID: $WORKFLOW_ID"
+        gh workflow run $WORKFLOW_ID
 
     - name: 📸 Upload Debug Evidence (Only on Failure)
       if: failure() || steps.bot_process.outcome == 'failure'
