@@ -15,8 +15,8 @@ from selenium.webdriver.support import expected_conditions as EC
 # --- CONFIGURATION ---
 THREADS = 2           
 BURST_SIZE = 5        
-BURST_DELAY = 0.5     
-CYCLE_DELAY = 2.0     
+BURST_DELAY = 1.0     # Slower for fresh sessions
+CYCLE_DELAY = 3.0     
 SESSION_DURATION = 1200 
 REFRESH_INTERVAL = 300 
 LOG_FILE = "message_log.txt"
@@ -60,40 +60,73 @@ def get_driver(agent_id):
     }
     chrome_options.add_experimental_option("mobileEmulation", mobile_emulation)
     
-    # Hide Automation Flags
     chrome_options.add_argument("--disable-blink-features=AutomationControlled")
     chrome_options.add_experimental_option("excludeSwitches", ["enable-automation"])
     
     chrome_options.add_argument(f"--user-data-dir=/tmp/chrome_p_{agent_id}_{random.randint(1,99999)}")
     return webdriver.Chrome(options=chrome_options)
 
-def perform_login(driver, agent_id, username, password):
-    log_status(agent_id, f"⚠️ Session Expired. Auto-Login for {username}...")
+def full_login_flow(driver, agent_id, username, password):
+    """
+    V33: FRESH LOGIN FLOW
+    Handles the entire login process from scratch, including popups.
+    """
+    log_status(agent_id, f"🔑 Starting Fresh Login for {username}...")
+    
     try:
         driver.get("https://www.instagram.com/accounts/login/")
-        time.sleep(6)
+        time.sleep(5)
         
-        try: driver.find_element(By.XPATH, "//button[contains(text(), 'Log In')]").click()
+        # 1. Accept Cookies (If present)
+        try: driver.find_element(By.XPATH, "//button[contains(text(), 'Allow')]").click()
         except: pass
 
-        user_input = WebDriverWait(driver, 10).until(EC.presence_of_element_located((By.NAME, "username")))
+        # 2. Enter Username
+        user_input = WebDriverWait(driver, 15).until(EC.presence_of_element_located((By.NAME, "username")))
         user_input.send_keys(username)
+        time.sleep(1)
+        
+        # 3. Enter Password
         pass_input = driver.find_element(By.NAME, "password")
         pass_input.send_keys(password)
         time.sleep(1)
-        pass_input.send_keys(Keys.ENTER)
         
-        log_status(agent_id, "🔐 Credentials sent...")
-        time.sleep(12)
+        # 4. Click Login
+        try:
+            # Look for the specific Mobile Login button
+            login_btn = driver.find_element(By.XPATH, "//button[@type='submit']")
+            login_btn.click()
+        except:
+            pass_input.send_keys(Keys.ENTER)
+            
+        log_status(agent_id, "⏳ Verifying Credentials...")
+        time.sleep(10)
         
-        if "login" not in driver.current_url:
-            log_status(agent_id, "✅ Auto-Login Successful!")
-            return True
-        else:
-            log_status(agent_id, "❌ Login Failed.")
+        # 5. Handle 'Save Login Info' Popup
+        if "onetap" in driver.current_url or "accounts" in driver.current_url:
+            try:
+                not_now_btn = WebDriverWait(driver, 5).until(
+                    EC.element_to_be_clickable((By.XPATH, "//button[contains(text(), 'Not Now')] | //div[text()='Not now']"))
+                )
+                not_now_btn.click()
+                time.sleep(3)
+            except: pass
+
+        # 6. Verify Success
+        driver.get("https://www.instagram.com/")
+        time.sleep(5)
+        
+        if "login" in driver.current_url:
+            log_status(agent_id, "❌ Fresh Login Failed (Wrong Pass or 2FA Triggered).")
+            driver.save_screenshot(f"debug_login_fail_{agent_id}.png")
             return False
+            
+        log_status(agent_id, "✅ Fresh Login Successful!")
+        return True
+
     except Exception as e:
-        log_status(agent_id, f"❌ Login Error: {e}")
+        log_status(agent_id, f"❌ Login Crash: {e}")
+        driver.save_screenshot(f"debug_login_crash_{agent_id}.png")
         return False
 
 def find_mobile_box(driver):
@@ -108,12 +141,7 @@ def find_mobile_box(driver):
     return None
 
 def mobile_js_inject(driver, element, text):
-    """
-    V32 FIX:
-    1. Uses JavaScript to inject the text (Bypasses 'BMP' error for Emojis)
-    2. Uses 'Send Keys' only for Space/Enter (Safe characters)
-    """
-    # 1. JS Injection (Safe for emojis/special chars)
+    # JS Inject for text
     driver.execute_script("""
         var elm = arguments[0], txt = arguments[1];
         elm.value += txt;
@@ -121,57 +149,44 @@ def mobile_js_inject(driver, element, text):
         elm.dispatchEvent(new Event('change', {bubbles: true}));
     """, element, text)
     
-    time.sleep(0.1)
+    time.sleep(0.2)
     
-    # 2. Trigger UI update with a safe key (Space)
+    # Space to wake UI
     element.send_keys(" ")
     element.send_keys(Keys.BACK_SPACE)
-    time.sleep(0.3) 
+    time.sleep(0.5) 
     
-    # 3. Click Send
+    # Click Send
     try:
-        # On Mobile, Look for the text "Send"
         send_btn = driver.find_element(By.XPATH, "//div[contains(text(), 'Send')]")
         send_btn.click()
     except:
-        # Fallback to Enter key
         element.send_keys(Keys.ENTER)
 
-def run_life_cycle(agent_id, user, pw, cookie, target, messages):
+def run_life_cycle(agent_id, user, pw, target, messages):
     driver = None
     sent_in_this_life = 0
     session_start_time = time.time()
     last_refresh_time = time.time()
     
     try:
-        log_status(agent_id, "🚀 Phoenix Rising (Mobile JS Mode)...")
+        log_status(agent_id, "🚀 Phoenix V33 (Fresh Login Mode)...")
         driver = get_driver(agent_id)
         
-        driver.get("https://www.instagram.com/")
-        time.sleep(3)
-        
-        if cookie:
-            clean_session = cookie.split("sessionid=")[1].split(";")[0] if "sessionid=" in cookie else cookie
-            driver.add_cookie({'name': 'sessionid', 'value': clean_session, 'path': '/'})
-            
-        driver.refresh()
-        time.sleep(5)
+        # 🚨 IGNORE COOKIE -> FORCE FRESH LOGIN
+        if not full_login_flow(driver, agent_id, user, pw):
+            return
 
         target_url = f"https://www.instagram.com/direct/t/{target}/"
-        log_status(agent_id, f"🔍 Navigating to: .../direct/t/{target[:5]}...")
+        log_status(agent_id, f"🔍 Navigating to Target...")
         driver.get(target_url)
         time.sleep(5)
         
+        # Clear Popups (Not Now, Cancel, etc.)
         try: driver.find_element(By.XPATH, "//button[text()='Not Now']").click()
         except: pass
         try: driver.find_element(By.XPATH, "//button[contains(text(), 'Cancel')]").click()
         except: pass
-
-        if "login" in driver.current_url:
-            if not perform_login(driver, agent_id, user, pw):
-                return
-            driver.get(target_url)
-            time.sleep(5)
 
         msg_box = find_mobile_box(driver)
         if not msg_box:
@@ -194,8 +209,6 @@ def run_life_cycle(agent_id, user, pw, cookie, target, messages):
                 for _ in range(BURST_SIZE):
                     msg = random.choice(messages)
                     jitter = " " 
-                    
-                    # 🚨 V32: USE JS INJECTOR
                     mobile_js_inject(driver, msg_box, f"{msg}{jitter}")
 
                     sent_in_this_life += 1
@@ -213,8 +226,6 @@ def run_life_cycle(agent_id, user, pw, cookie, target, messages):
 
     except Exception as e:
         log_status(agent_id, f"❌ Critical Crash: {e}")
-        if driver:
-            driver.save_screenshot(f"debug_crash_agent_{agent_id}.png")
     finally:
         if driver:
             try: driver.quit()
@@ -222,20 +233,20 @@ def run_life_cycle(agent_id, user, pw, cookie, target, messages):
         try: shutil.rmtree(f"/tmp/chrome_p_{agent_id}", ignore_errors=True)
         except: pass
 
-def agent_worker(agent_id, user, pw, cookie, target, messages):
+def agent_worker(agent_id, user, pw, target, messages):
     while True:
-        run_life_cycle(agent_id, user, pw, cookie, target, messages)
+        # Note: We removed 'cookie' from the arguments here
+        run_life_cycle(agent_id, user, pw, target, messages)
         time.sleep(10)
 
 def main():
     with open(LOG_FILE, "w") as f:
         f.write(f"--- SESSION START: {datetime.datetime.now()} ---\n")
     
-    print(f"🔥 V32 MOBILE JS HYBRID | {THREADS} THREADS", flush=True)
+    print(f"🔥 V33 FRESH LOGIN | {THREADS} THREADS", flush=True)
     
     user = os.environ.get("INSTA_USER", "").strip()
     pw = os.environ.get("INSTA_PASS", "").strip()
-    cookie = os.environ.get("INSTA_COOKIE", "").strip()
     target = os.environ.get("TARGET_THREAD_ID", "").strip()
     messages = os.environ.get("MESSAGES", "Hello").split("|")
 
@@ -245,7 +256,7 @@ def main():
 
     with ThreadPoolExecutor(max_workers=THREADS) as executor:
         for i in range(THREADS):
-            executor.submit(agent_worker, i+1, user, pw, cookie, target, messages)
+            executor.submit(agent_worker, i+1, user, pw, target, messages)
 
 if __name__ == "__main__":
     main()
