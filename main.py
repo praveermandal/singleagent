@@ -11,7 +11,6 @@ from selenium.webdriver.common.keys import Keys
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
-from selenium.webdriver.common.action_chains import ActionChains
 
 # --- CONFIGURATION ---
 THREADS = 2           
@@ -54,8 +53,7 @@ def get_driver(agent_id):
     chrome_options.add_argument("--disable-dev-shm-usage")
     chrome_options.add_argument("--disable-gpu")
     
-    # 🚨 V31: MANUAL MOBILE METRICS (Universal Fix)
-    # We define the screen size manually so it never fails
+    # MANUAL MOBILE METRICS (Pixel 5)
     mobile_emulation = {
         "deviceMetrics": { "width": 393, "height": 851, "pixelRatio": 3.0 },
         "userAgent": "Mozilla/5.0 (Linux; Android 11; Pixel 5) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/90.0.4430.91 Mobile Safari/537.36"
@@ -75,7 +73,6 @@ def perform_login(driver, agent_id, username, password):
         driver.get("https://www.instagram.com/accounts/login/")
         time.sleep(6)
         
-        # Mobile Login Button Check
         try: driver.find_element(By.XPATH, "//button[contains(text(), 'Log In')]").click()
         except: pass
 
@@ -110,17 +107,28 @@ def find_mobile_box(driver):
         except: continue
     return None
 
-def mobile_send_logic(driver, element, text):
+def mobile_js_inject(driver, element, text):
     """
-    Mobile Send Logic:
-    1. Click Text Area
-    2. Type text
-    3. Click the 'Send' text button (common on mobile view)
+    V32 FIX:
+    1. Uses JavaScript to inject the text (Bypasses 'BMP' error for Emojis)
+    2. Uses 'Send Keys' only for Space/Enter (Safe characters)
     """
-    element.click()
-    element.send_keys(text)
-    time.sleep(0.5) 
+    # 1. JS Injection (Safe for emojis/special chars)
+    driver.execute_script("""
+        var elm = arguments[0], txt = arguments[1];
+        elm.value += txt;
+        elm.dispatchEvent(new Event('input', {bubbles: true}));
+        elm.dispatchEvent(new Event('change', {bubbles: true}));
+    """, element, text)
     
+    time.sleep(0.1)
+    
+    # 2. Trigger UI update with a safe key (Space)
+    element.send_keys(" ")
+    element.send_keys(Keys.BACK_SPACE)
+    time.sleep(0.3) 
+    
+    # 3. Click Send
     try:
         # On Mobile, Look for the text "Send"
         send_btn = driver.find_element(By.XPATH, "//div[contains(text(), 'Send')]")
@@ -136,7 +144,7 @@ def run_life_cycle(agent_id, user, pw, cookie, target, messages):
     last_refresh_time = time.time()
     
     try:
-        log_status(agent_id, "🚀 Phoenix Rising (Manual Mobile Mode)...")
+        log_status(agent_id, "🚀 Phoenix Rising (Mobile JS Mode)...")
         driver = get_driver(agent_id)
         
         driver.get("https://www.instagram.com/")
@@ -154,7 +162,6 @@ def run_life_cycle(agent_id, user, pw, cookie, target, messages):
         driver.get(target_url)
         time.sleep(5)
         
-        # Clear Mobile App Popups
         try: driver.find_element(By.XPATH, "//button[text()='Not Now']").click()
         except: pass
         try: driver.find_element(By.XPATH, "//button[contains(text(), 'Cancel')]").click()
@@ -188,7 +195,8 @@ def run_life_cycle(agent_id, user, pw, cookie, target, messages):
                     msg = random.choice(messages)
                     jitter = " " 
                     
-                    mobile_send_logic(driver, msg_box, f"{msg}{jitter}")
+                    # 🚨 V32: USE JS INJECTOR
+                    mobile_js_inject(driver, msg_box, f"{msg}{jitter}")
 
                     sent_in_this_life += 1
                     with COUNTER_LOCK:
@@ -223,7 +231,7 @@ def main():
     with open(LOG_FILE, "w") as f:
         f.write(f"--- SESSION START: {datetime.datetime.now()} ---\n")
     
-    print(f"🔥 V31 UNIVERSAL MOBILE | {THREADS} THREADS", flush=True)
+    print(f"🔥 V32 MOBILE JS HYBRID | {THREADS} THREADS", flush=True)
     
     user = os.environ.get("INSTA_USER", "").strip()
     pw = os.environ.get("INSTA_PASS", "").strip()
