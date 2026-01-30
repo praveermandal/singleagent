@@ -15,7 +15,7 @@ from selenium.webdriver.support import expected_conditions as EC
 # --- CONFIGURATION ---
 THREADS = 2           
 BURST_SIZE = 5        
-BURST_DELAY = 1.0     # Slower for fresh sessions
+BURST_DELAY = 1.0     
 CYCLE_DELAY = 3.0     
 SESSION_DURATION = 1200 
 REFRESH_INTERVAL = 300 
@@ -66,34 +66,50 @@ def get_driver(agent_id):
     chrome_options.add_argument(f"--user-data-dir=/tmp/chrome_p_{agent_id}_{random.randint(1,99999)}")
     return webdriver.Chrome(options=chrome_options)
 
-def full_login_flow(driver, agent_id, username, password):
+def clear_popups(driver, agent_id):
     """
-    V33: FRESH LOGIN FLOW
-    Handles the entire login process from scratch, including popups.
+    V34: UI BULLDOZER
+    Aggressively clicks every known 'Close' button to reveal the chat.
     """
-    log_status(agent_id, f"🔑 Starting Fresh Login for {username}...")
+    buttons_to_click = [
+        "//button[text()='Not Now']",
+        "//button[text()='Cancel']",
+        "//div[text()='Not now']",
+        "//button[contains(text(), 'Use the App')]/following-sibling::button", # Close app upsell
+        "//div[@role='dialog']//button[contains(@aria-label, 'Close')]"
+    ]
     
+    for xpath in buttons_to_click:
+        try:
+            btn = driver.find_element(By.XPATH, xpath)
+            btn.click()
+            log_status(agent_id, f"🧹 Cleared Popup: {xpath}")
+            time.sleep(1)
+        except:
+            pass
+            
+    # Blind Escape Key (Closes generic modals)
+    try: ActionChains(driver).send_keys(Keys.ESCAPE).perform()
+    except: pass
+
+def full_login_flow(driver, agent_id, username, password):
+    log_status(agent_id, f"🔑 Starting Fresh Login for {username}...")
     try:
         driver.get("https://www.instagram.com/accounts/login/")
         time.sleep(5)
         
-        # 1. Accept Cookies (If present)
         try: driver.find_element(By.XPATH, "//button[contains(text(), 'Allow')]").click()
         except: pass
 
-        # 2. Enter Username
         user_input = WebDriverWait(driver, 15).until(EC.presence_of_element_located((By.NAME, "username")))
         user_input.send_keys(username)
         time.sleep(1)
         
-        # 3. Enter Password
         pass_input = driver.find_element(By.NAME, "password")
         pass_input.send_keys(password)
         time.sleep(1)
         
-        # 4. Click Login
         try:
-            # Look for the specific Mobile Login button
             login_btn = driver.find_element(By.XPATH, "//button[@type='submit']")
             login_btn.click()
         except:
@@ -102,22 +118,14 @@ def full_login_flow(driver, agent_id, username, password):
         log_status(agent_id, "⏳ Verifying Credentials...")
         time.sleep(10)
         
-        # 5. Handle 'Save Login Info' Popup
-        if "onetap" in driver.current_url or "accounts" in driver.current_url:
-            try:
-                not_now_btn = WebDriverWait(driver, 5).until(
-                    EC.element_to_be_clickable((By.XPATH, "//button[contains(text(), 'Not Now')] | //div[text()='Not now']"))
-                )
-                not_now_btn.click()
-                time.sleep(3)
-            except: pass
+        # Handle Post-Login Popups
+        clear_popups(driver, agent_id)
 
-        # 6. Verify Success
         driver.get("https://www.instagram.com/")
         time.sleep(5)
         
         if "login" in driver.current_url:
-            log_status(agent_id, "❌ Fresh Login Failed (Wrong Pass or 2FA Triggered).")
+            log_status(agent_id, "❌ Fresh Login Failed.")
             driver.save_screenshot(f"debug_login_fail_{agent_id}.png")
             return False
             
@@ -126,14 +134,19 @@ def full_login_flow(driver, agent_id, username, password):
 
     except Exception as e:
         log_status(agent_id, f"❌ Login Crash: {e}")
-        driver.save_screenshot(f"debug_login_crash_{agent_id}.png")
         return False
 
 def find_mobile_box(driver):
+    """
+    V34: EXPANDED SELECTORS
+    Tries 5 different ways to find the chat box on Mobile Web.
+    """
     selectors = [
         "//textarea", 
+        "//div[@role='textbox']",
         "//textarea[contains(@placeholder, 'Message...')]",
-        "//div[@role='textbox']"
+        "//div[contains(@aria-label, 'Message')]",
+        "//form//textarea" # Generic form textarea
     ]
     for xpath in selectors:
         try: return driver.find_element(By.XPATH, xpath)
@@ -141,7 +154,6 @@ def find_mobile_box(driver):
     return None
 
 def mobile_js_inject(driver, element, text):
-    # JS Inject for text
     driver.execute_script("""
         var elm = arguments[0], txt = arguments[1];
         elm.value += txt;
@@ -150,13 +162,10 @@ def mobile_js_inject(driver, element, text):
     """, element, text)
     
     time.sleep(0.2)
-    
-    # Space to wake UI
     element.send_keys(" ")
     element.send_keys(Keys.BACK_SPACE)
     time.sleep(0.5) 
     
-    # Click Send
     try:
         send_btn = driver.find_element(By.XPATH, "//div[contains(text(), 'Send')]")
         send_btn.click()
@@ -170,28 +179,29 @@ def run_life_cycle(agent_id, user, pw, target, messages):
     last_refresh_time = time.time()
     
     try:
-        log_status(agent_id, "🚀 Phoenix V33 (Fresh Login Mode)...")
+        log_status(agent_id, "🚀 Phoenix V34 (UI Bulldozer)...")
         driver = get_driver(agent_id)
         
-        # 🚨 IGNORE COOKIE -> FORCE FRESH LOGIN
         if not full_login_flow(driver, agent_id, user, pw):
             return
 
         target_url = f"https://www.instagram.com/direct/t/{target}/"
         log_status(agent_id, f"🔍 Navigating to Target...")
         driver.get(target_url)
-        time.sleep(5)
+        time.sleep(8) # Wait longer for Mobile UI to load
         
-        # Clear Popups (Not Now, Cancel, etc.)
-        try: driver.find_element(By.XPATH, "//button[text()='Not Now']").click()
-        except: pass
-        try: driver.find_element(By.XPATH, "//button[contains(text(), 'Cancel')]").click()
-        except: pass
+        # 🚜 BULLDOZER MODE: CLEAR ALL POPUPS
+        clear_popups(driver, agent_id)
+        time.sleep(2)
 
         msg_box = find_mobile_box(driver)
         if not msg_box:
-            log_status(agent_id, f"❌ ERROR: Chat box not found.")
+            log_status(agent_id, f"❌ ERROR: Chat box not found. URL: {driver.current_url}")
             driver.save_screenshot(f"debug_mobile_error_{agent_id}.png")
+            
+            # If redirected to inbox, warn user
+            if "/direct/inbox/" in driver.current_url:
+                 log_status(agent_id, "💀 FATAL: Redirected to Inbox! ID is wrong or blocked.")
             return
 
         log_status(agent_id, "✅ Target Locked. Sending...")
@@ -200,7 +210,8 @@ def run_life_cycle(agent_id, user, pw, target, messages):
             if (time.time() - last_refresh_time) > REFRESH_INTERVAL:
                 log_status(agent_id, "♻️ RAM Soft Refresh...")
                 driver.refresh()
-                time.sleep(5)
+                time.sleep(8)
+                clear_popups(driver, agent_id)
                 msg_box = find_mobile_box(driver)
                 if not msg_box: break
                 last_refresh_time = time.time()
@@ -235,7 +246,6 @@ def run_life_cycle(agent_id, user, pw, target, messages):
 
 def agent_worker(agent_id, user, pw, target, messages):
     while True:
-        # Note: We removed 'cookie' from the arguments here
         run_life_cycle(agent_id, user, pw, target, messages)
         time.sleep(10)
 
@@ -243,7 +253,7 @@ def main():
     with open(LOG_FILE, "w") as f:
         f.write(f"--- SESSION START: {datetime.datetime.now()} ---\n")
     
-    print(f"🔥 V33 FRESH LOGIN | {THREADS} THREADS", flush=True)
+    print(f"🔥 V34 UI BULLDOZER | {THREADS} THREADS", flush=True)
     
     user = os.environ.get("INSTA_USER", "").strip()
     pw = os.environ.get("INSTA_PASS", "").strip()
