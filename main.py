@@ -21,7 +21,7 @@ from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 
 # --- V100 SINGLE AGENT CONFIGURATION ---
-THREADS = 1             # ✅ Single Agent
+THREADS = 2             # ✅ double Agent
 TOTAL_DURATION = 25000  # 7 Hours
 
 # ⚡ HYPER SPEED
