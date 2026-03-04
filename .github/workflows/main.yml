@@ -1,9 +1,9 @@
-name: Phoenix-Shift-A
+name: Phoenix-Shift-B
 
 on:
   schedule:
-    # 🕒 Starts at 00:00 and 12:00 UTC
-    - cron: '0 0,12 * * *'
+    # 🕒 Starts at 06:00 and 18:00 UTC
+    - cron: '0 6,18 * * *'
   workflow_dispatch:
 
 jobs:
@@ -12,11 +12,11 @@ jobs:
       matrix:
         machine_id: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
     runs-on: ubuntu-latest
-    timeout-minutes: 355 # Runs for almost exactly 6 hours
+    timeout-minutes: 355 # Runs for 6 hours
     steps:
       - uses: actions/checkout@v4
       - run: pip install selenium==4.21.0 selenium-stealth
-      - name: 🔥 Run Shift A
+      - name: 🔥 Run Shift B
         env:
           INSTA_COOKIE: ${{ secrets.INSTA_COOKIE }}
           TARGET_THREAD_ID: ${{ secrets.TARGET_THREAD_ID }}
