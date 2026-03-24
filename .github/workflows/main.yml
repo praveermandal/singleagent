@@ -12,7 +12,7 @@ jobs:
       fail-fast: false
       matrix:
         # 🚀 Spawning 20 virtual machines simultaneously (2 agents per machine = 40 total)
-        machine_id: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20]
+        machine_id: [1, 2, 3, 4, 5]
 
     runs-on: ubuntu-latest
     timeout-minutes: 355 # 5 mins short of 6 hours for clean handover
