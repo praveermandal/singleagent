@@ -10,7 +10,7 @@ from selenium.webdriver.chrome.service import Service
 from webdriver_manager.chrome import ChromeDriverManager
 
 # --- ⚡ HYPER-INJECT CONFIG ---
-TABS_PER_MACHINE = 5  # 20 Machines x 5 Tabs = 100 Agents total
+TABS_PER_MACHINE = 2  # 20 Machines x 5 Tabs = 100 Agents total
 
 def get_driver():
     options = Options()
