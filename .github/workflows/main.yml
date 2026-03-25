@@ -1,39 +1,71 @@
-name: Phoenix V100.30 Hyper-Drive (40-Agent Matrix)
+name: Phoenix V100 (5-Machine Matrix)
 
 on:
+  workflow_dispatch:
   schedule:
-    # 🕒 Rotates every 6 hours (00:00, 06:00, 12:00, 18:00 UTC)
     - cron: '0 */6 * * *'
-  workflow_dispatch: # Allows manual trigger for testing
 
 jobs:
-  ultra-strike:
-    strategy:
-      fail-fast: false
-      matrix:
-        # 🚀 Spawning 20 virtual machines simultaneously (2 agents per machine = 40 total)
-        machine_id: [1, 2, 3, 4, 5]
-
+  run-loop:
     runs-on: ubuntu-latest
-    timeout-minutes: 355 # 5 mins short of 6 hours for clean handover
+    timeout-minutes: 350
+    strategy:
+      matrix:
+        machine-id: [1, 2, 3, 4, 5]
+      fail-fast: false
 
     steps:
-      - name: Checkout Code
-        uses: actions/checkout@v4
+    - name: Checkout Code
+      uses: actions/checkout@v4
 
-      - name: Set up Python 3.11
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.11'
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.9'
 
-      - name: Install Critical Dependencies
-        # ✅ FIXED: This line ensures 'webdriver-manager' and 'selenium' are present
-        run: |
-          python -m pip install --upgrade pip
-          pip install selenium==4.21.0 selenium-stealth webdriver-manager
+    - name: Install Dependencies
+      run: |
+        pip install selenium==4.9.0 selenium-stealth webdriver-manager
 
-      - name: Install Google Chrome
-        run: |
+    - name: 🔥 Run Phoenix Engine
+      env:
+        INSTA_COOKIE: ${{ secrets.INSTA_COOKIE }}
+        TARGET_THREAD_ID: ${{ secrets.TARGET_THREAD_ID }}
+        TARGET_NAME: ${{ secrets.TARGET_NAME }}
+        MACHINE_INDEX: ${{ matrix.machine-id }}
+      run: |
+        python main.py
+        while true; do
+          python -u main.py
+          echo "⚠️ Engine Exit. Respawning in 5s..."
+          sleep 5
+        done
+        python main.py        while true; do
+          python -u main.py
+          echo "⚠️ Engine Exit. Respawning in 5s..."
+          sleep 5
+        done
+
+    - name: 🔥 Run Phoenix Engine (Machine ${{ matrix.machine-id }})
+      env:
+        PYTHONIOENCODING: utf-8
+        INSTA_COOKIE: ${{ secrets.INSTA_COOKIE }}
+        TARGET_THREAD_ID: ${{ secrets.TARGET_THREAD_ID }}
+        MESSAGES: ${{ secrets.MESSAGES }}
+        MACHINE_INDEX: ${{ matrix.machine-id }} # Passes the ID to your script if needed
+      run: |
+        while true; do
+          echo "🚀 Starting Linux Turbo Engine on Machine #${MACHINE_INDEX}..."
+          
+          if python main.py; then
+            echo "✅ Script finished naturally."
+          else
+            echo "❌ Script crashed internally."
+          fi
+          
+          echo "⚠️ Crash Detected. Respawning in 10 seconds..."
+          sleep 10
+        done
           sudo apt-get update
           sudo apt-get install -y google-chrome-stable
 
